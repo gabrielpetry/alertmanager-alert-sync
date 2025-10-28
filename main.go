@@ -4,6 +4,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"time"
 
 	// We'll need this to convert numbers to strings
 	// Prometheus metrics client
@@ -25,7 +27,7 @@ var (
 		Name: "alertmanager_sync_alerts",
 		Help: "alerts with state from alertmanager api",
 	},
-		[]string{"alertname", "alertstate", "alertstart", "cluster", "job", "severity"},
+		[]string{"alertname", "alertstate", "alertstart", "since", "cluster", "job", "severity"},
 	)
 
 	alertSyncTotal = promauto.NewCounter(prometheus.CounterOpts{
@@ -73,10 +75,19 @@ func syncHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, alert := range ok.Payload {
+		layout := time.RFC3339
+
+		parsedTime, err := time.Parse(layout, alert.StartsAt.String())
+		if err != nil {
+			log.Printf("Error parsing time: %v", err)
+			panic(err)
+		}
+
 		alertsSyncAlerts.With(prometheus.Labels{
 			"alertname":  alert.Labels["alertname"],
 			"alertstate": *alert.Status.State,
-			"alertstart": alert.StartsAt.String(),
+			"alertstart": strconv.FormatInt(parsedTime.Unix(), 10),
+			"since":      strconv.FormatFloat(time.Since(parsedTime).Seconds(), 'f', 0, 64),
 			"cluster":    alert.Labels["cluster"],
 			"job":        alert.Labels["job"],
 			"severity":   alert.Labels["severity"],
