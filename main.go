@@ -78,6 +78,9 @@ func syncHandler(w http.ResponseWriter, r *http.Request) {
 			"alertstate": *alert.Status.State,
 			"alertstart": alert.StartsAt.String(),
 			"since":      alert.StartsAt.String(),
+			"cluster":    alert.Labels["cluster"],
+			"job":        alert.Labels["job"],
+			"severity":   alert.Labels["severity"],
 		}).Set(1)
 	}
 	promhttp.Handler().ServeHTTP(w, r)
