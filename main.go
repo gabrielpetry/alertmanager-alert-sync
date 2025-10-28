@@ -27,7 +27,7 @@ var (
 		Name: "alertmanager_sync_alerts",
 		Help: "alerts with state from alertmanager api",
 	},
-		[]string{"alertname", "alertstate", "alertstart", "since", "cluster", "job", "severity"},
+		[]string{"alertname", "alertstate", "alertstart", "cluster", "job", "severity"},
 	)
 
 	alertSyncTotal = promauto.NewCounter(prometheus.CounterOpts{
@@ -87,7 +87,6 @@ func syncHandler(w http.ResponseWriter, r *http.Request) {
 			"alertname":  alert.Labels["alertname"],
 			"alertstate": *alert.Status.State,
 			"alertstart": strconv.FormatInt(parsedTime.Unix(), 10),
-			"since":      strconv.FormatFloat(time.Since(parsedTime).Seconds(), 'f', 0, 64),
 			"cluster":    alert.Labels["cluster"],
 			"job":        alert.Labels["job"],
 			"severity":   alert.Labels["severity"],
