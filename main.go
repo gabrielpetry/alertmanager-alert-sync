@@ -24,27 +24,12 @@ import (
 
 var (
 	// This is the client we'll use to talk to Alertmanager
-	amAPI *amclient.AlertmanagerAPI
-
-	defaultLabels = []string{"alertname", "alertstate", "alertstart", "alertjob"}
-	customLabels  = strings.Split(os.Getenv("CUSTOM_LABELS"), ",")
-
-	alertsSyncAlerts = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "alertmanager_sync_alerts",
-		Help: "alerts with state from alertmanager api",
-	},
-		append(defaultLabels, customLabels...),
-	)
-
-	alertSyncTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "alertmanager_sync_total",
-		Help: "The total number of sync attempts to Alertmanager",
-	})
-
-	alertsSyncFailuresTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "alertmanager_sync_failures_total",
-		Help: "The total number of failed sync attempts to Alertmanager",
-	})
+	amAPI                                 *amclient.AlertmanagerAPI
+	alertsSyncAlerts                      *prometheus.GaugeVec
+	alertSyncTotal                        prometheus.Counter
+	alertsSyncFailuresTotal               prometheus.Counter
+	alertsExtraLabelsFromAlertLabels      []string
+	alertsExtraLabelsFromAlertAnnotations []string
 )
 
 // init() runs once before main() to set up global variables.
@@ -96,11 +81,21 @@ func syncHandler(w http.ResponseWriter, r *http.Request) {
 			"alertjob":   alert.Labels["job"],
 		}
 
-		for _, label := range customLabels {
+		log.Printf("Processing alert: %s", alertsExtraLabelsFromAlertLabels)
+		for _, label := range alertsExtraLabelsFromAlertLabels {
+			log.Printf("Processing extra label from alert labels: %s", label)
 			if val, ok := alert.Labels[label]; ok {
 				metricLabels[label] = val
 			} else {
 				metricLabels[label] = ""
+			}
+		}
+
+		for _, annotation := range alertsExtraLabelsFromAlertAnnotations {
+			if val, ok := alert.Annotations[annotation]; ok {
+				metricLabels[annotation] = val
+			} else {
+				metricLabels[annotation] = ""
 			}
 		}
 
@@ -110,6 +105,57 @@ func syncHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	defaultLabels := []string{"alertname", "alertstate", "alertstart", "alertjob"}
+	alertsExtraLabelsFromAlertLabels = strings.Split(os.Getenv("ALERT_LABELS"), ",")
+	alertsExtraLabelsFromAlertAnnotations = strings.Split(os.Getenv("ALERT_ANNOTATIONS"), ",")
+	alertLabels := defaultLabels
+
+	alertsExtraLabelsFromAlertLabelsTrimmed := []string{}
+	for _, label := range alertsExtraLabelsFromAlertLabels {
+		trimmed := strings.TrimSpace(label)
+		if trimmed != "" {
+			alertsExtraLabelsFromAlertLabelsTrimmed = append(alertsExtraLabelsFromAlertLabelsTrimmed, trimmed)
+		}
+	}
+
+	alertsExtraLabelsFromAlertAnnotationsTrimmed := []string{}
+	for _, label := range alertsExtraLabelsFromAlertAnnotations {
+		trimmed := strings.TrimSpace(label)
+		if trimmed != "" {
+			alertsExtraLabelsFromAlertAnnotationsTrimmed = append(alertsExtraLabelsFromAlertAnnotationsTrimmed, trimmed)
+		}
+	}
+
+	alertsExtraLabelsFromAlertLabels = alertsExtraLabelsFromAlertLabelsTrimmed
+	alertsExtraLabelsFromAlertAnnotations = alertsExtraLabelsFromAlertAnnotationsTrimmed
+
+	for _, label := range append(alertsExtraLabelsFromAlertLabels, alertsExtraLabelsFromAlertAnnotations...) {
+		if label != "" {
+			alertLabels = append(alertLabels, label)
+		}
+	}
+
+	log.Printf("Using extra labels from alert labels: %v", alertsExtraLabelsFromAlertLabels)
+	log.Printf("Using extra labels from alert annotations: %v", alertsExtraLabelsFromAlertAnnotations)
+	log.Printf("Final alert labels: %v", alertLabels)
+
+	alertsSyncAlerts = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "alertmanager_sync_alerts",
+		Help: "alerts with state from alertmanager api",
+	},
+		alertLabels,
+	)
+
+	alertSyncTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "alertmanager_sync_total",
+		Help: "The total number of sync attempts to Alertmanager",
+	})
+
+	alertsSyncFailuresTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "alertmanager_sync_failures_total",
+		Help: "The total number of failed sync attempts to Alertmanager",
+	})
+
 	// Register the /metrics endpoint
 	http.HandleFunc("/metrics", syncHandler)
 
