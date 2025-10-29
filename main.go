@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	// We'll need this to convert numbers to strings
@@ -14,6 +16,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	// New Alertmanager client imports
+
 	"github.com/go-openapi/strfmt"
 	amclient "github.com/prometheus/alertmanager/api/v2/client"
 	"github.com/prometheus/alertmanager/api/v2/client/alert"
@@ -23,11 +26,14 @@ var (
 	// This is the client we'll use to talk to Alertmanager
 	amAPI *amclient.AlertmanagerAPI
 
+	defaultLabels = []string{"alertname", "alertstate", "alertstart", "alertjob"}
+	customLabels  = strings.Split(os.Getenv("CUSTOM_LABELS"), ",")
+
 	alertsSyncAlerts = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "alertmanager_sync_alerts",
 		Help: "alerts with state from alertmanager api",
 	},
-		[]string{"alertname", "alertstate", "alertstart", "cluster", "alertjob", "severity"},
+		append(defaultLabels, customLabels...),
 	)
 
 	alertSyncTotal = promauto.NewCounter(prometheus.CounterOpts{
@@ -83,14 +89,22 @@ func syncHandler(w http.ResponseWriter, r *http.Request) {
 			panic(err)
 		}
 
-		alertsSyncAlerts.With(prometheus.Labels{
+		metricLabels := prometheus.Labels{
 			"alertname":  alert.Labels["alertname"],
 			"alertstate": *alert.Status.State,
 			"alertstart": strconv.FormatInt(parsedTime.Unix(), 10),
-			"cluster":    alert.Labels["cluster"],
 			"alertjob":   alert.Labels["job"],
-			"severity":   alert.Labels["severity"],
-		}).Set(1)
+		}
+
+		for _, label := range customLabels {
+			if val, ok := alert.Labels[label]; ok {
+				metricLabels[label] = val
+			} else {
+				metricLabels[label] = ""
+			}
+		}
+
+		alertsSyncAlerts.With(metricLabels).Set(1)
 	}
 	promhttp.Handler().ServeHTTP(w, r)
 }
@@ -99,7 +113,11 @@ func main() {
 	// Register the /metrics endpoint
 	http.HandleFunc("/metrics", syncHandler)
 
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
 	// Start the server
-	log.Println("Starting server on port :8080...")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Printf("Starting server on port :%s ...", port)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", port), nil))
 }
