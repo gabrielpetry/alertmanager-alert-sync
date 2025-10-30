@@ -145,7 +145,7 @@ Returns Prometheus metrics for the reconciliation process.
 
 **Alert State Metrics:**
 
-- `alertmanager_sync_alert_state`: Current state of each alert (labels: alertname, alertstate, suppressed, plus configured labels/annotations)
+- `alertmanager_sync_alert_state`: Current state of each alert (labels: alertname, suppressed, plus configured labels/annotations)
 - `alertmanager_sync_alert_export_total`: Total number of alert export attempts
 - `alertmanager_sync_alert_export_failures_total`: Total number of failed alert exports
 - `alertmanager_sync_last_alert_export_timestamp_seconds`: Timestamp of the last alert export (Unix time)
@@ -166,13 +166,11 @@ alertmanager_sync_inconsistencies_found
 time() - alertmanager_sync_last_reconciliation_timestamp_seconds
 
 # Count of active alerts by severity
-sum(alertmanager_sync_alert_state{alertstate="active"}) by (severity)
+sum(alertmanager_sync_alert_state) by (severity)
 
 # Count of suppressed alerts
 sum(alertmanager_sync_alert_state{suppressed="true"})
 
-# Alerts by state
-sum(alertmanager_sync_alert_state) by (alertstate, suppressed)
 ```
 
 ### `/reconcile`

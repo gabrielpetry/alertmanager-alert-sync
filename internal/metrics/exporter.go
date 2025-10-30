@@ -100,7 +100,7 @@ func NewExporter() *Exporter {
 	alertAnnotations := parseEnvList("ALERTMANAGER_ALERTS_ANNOTATIONS")
 
 	// Default labels that are always included
-	defaultLabels := []string{"alertname", "alertstate", "suppressed"}
+	defaultLabels := []string{"alertname", "suppressed"}
 
 	// Combine all labels for the metric
 	allLabels := append(defaultLabels, alertLabels...)
@@ -245,7 +245,6 @@ func (e *Exporter) exportAlert(alert *models.GettableAlert) error {
 	// Build metric labels
 	metricLabels := prometheus.Labels{
 		"alertname":  alert.Labels["alertname"],
-		"alertstate": *alert.Status.State,
 		"suppressed": suppressed,
 	}
 
@@ -266,9 +265,14 @@ func (e *Exporter) exportAlert(alert *models.GettableAlert) error {
 			metricLabels[annotation] = ""
 		}
 	}
-
+	var alertStateNumber float64
+	alertStateNumber = 0.0
+	// Set the gauge value to 1 (alert firing)
+	if *alert.Status.State == "active" {
+		alertStateNumber = 1
+	}
 	// Set the gauge value to 1 (alert exists)
-	e.alertStateGauge.With(metricLabels).Set(1)
+	e.alertStateGauge.With(metricLabels).Set(alertStateNumber)
 
 	return nil
 }
