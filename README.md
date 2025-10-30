@@ -134,45 +134,45 @@ Returns Prometheus metrics for the reconciliation process.
 
 **Reconciliation Metrics:**
 
-- `alertmanager_reconciliation_total`: Total number of reconciliation attempts
-- `alertmanager_reconciliation_failures_total`: Total number of failed reconciliations
-- `alertmanager_reconciliation_duration_seconds`: Histogram of reconciliation durations
-- `alertmanager_inconsistencies_found`: Number of inconsistencies found in last reconciliation
-- `alertmanager_inconsistencies_resolved_total`: Total number of inconsistencies successfully resolved
-- `alertmanager_inconsistencies_failed_resolve_total`: Total number of inconsistencies that failed to resolve
-- `alertmanager_last_reconciliation_timestamp_seconds`: Timestamp of the last reconciliation (Unix time)
-- `alertmanager_last_reconciliation_success`: Whether the last reconciliation was successful (1=success, 0=failure)
+- `alertmanager_sync_reconciliation_total`: Total number of reconciliation attempts
+- `alertmanager_sync_reconciliation_failures_total`: Total number of failed reconciliations
+- `alertmanager_sync_reconciliation_duration_seconds`: Histogram of reconciliation durations
+- `alertmanager_sync_inconsistencies_found`: Number of inconsistencies found in last reconciliation
+- `alertmanager_sync_inconsistencies_resolved_total`: Total number of inconsistencies successfully resolved
+- `alertmanager_sync_inconsistencies_failed_resolve_total`: Total number of inconsistencies that failed to resolve
+- `alertmanager_sync_last_reconciliation_timestamp_seconds`: Timestamp of the last reconciliation (Unix time)
+- `alertmanager_sync_last_reconciliation_success`: Whether the last reconciliation was successful (1=success, 0=failure)
 
 **Alert State Metrics:**
 
-- `alertmanager_alert_state`: Current state of each alert (labels: alertname, alertstate, suppressed, plus configured labels/annotations)
-- `alertmanager_alert_export_total`: Total number of alert export attempts
-- `alertmanager_alert_export_failures_total`: Total number of failed alert exports
-- `alertmanager_last_alert_export_timestamp_seconds`: Timestamp of the last alert export (Unix time)
+- `alertmanager_sync_alert_state`: Current state of each alert (labels: alertname, alertstate, suppressed, plus configured labels/annotations)
+- `alertmanager_sync_alert_export_total`: Total number of alert export attempts
+- `alertmanager_sync_alert_export_failures_total`: Total number of failed alert exports
+- `alertmanager_sync_last_alert_export_timestamp_seconds`: Timestamp of the last alert export (Unix time)
 
 **Example Prometheus queries:**
 
 ```promql
 # Reconciliation success rate
-rate(alertmanager_reconciliation_total[5m]) - rate(alertmanager_reconciliation_failures_total[5m])
+rate(alertmanager_sync_reconciliation_total[5m]) - rate(alertmanager_sync_reconciliation_failures_total[5m])
 
 # Average reconciliation duration
-rate(alertmanager_reconciliation_duration_seconds_sum[5m]) / rate(alertmanager_reconciliation_duration_seconds_count[5m])
+rate(alertmanager_sync_reconciliation_duration_seconds_sum[5m]) / rate(alertmanager_sync_reconciliation_duration_seconds_count[5m])
 
 # Current inconsistencies
-alertmanager_inconsistencies_found
+alertmanager_sync_inconsistencies_found
 
 # Time since last successful reconciliation
-time() - alertmanager_last_reconciliation_timestamp_seconds
+time() - alertmanager_sync_last_reconciliation_timestamp_seconds
 
 # Count of active alerts by severity
-sum(alertmanager_alert_state{alertstate="active"}) by (severity)
+sum(alertmanager_sync_alert_state{alertstate="active"}) by (severity)
 
 # Count of suppressed alerts
-sum(alertmanager_alert_state{suppressed="true"})
+sum(alertmanager_sync_alert_state{suppressed="true"})
 
 # Alerts by state
-sum(alertmanager_alert_state) by (alertstate, suppressed)
+sum(alertmanager_sync_alert_state) by (alertstate, suppressed)
 ```
 
 ### `/reconcile`
@@ -232,19 +232,19 @@ groups:
   - name: alertmanager-sync
     rules:
       - alert: ReconciliationFailing
-        expr: alertmanager_last_reconciliation_success == 0
+        expr: alertmanager_sync_last_reconciliation_success == 0
         for: 10m
         annotations:
           summary: "Alert reconciliation is failing"
           
       - alert: HighInconsistencyRate
-        expr: alertmanager_inconsistencies_found > 10
+        expr: alertmanager_sync_inconsistencies_found > 10
         for: 5m
         annotations:
           summary: "High number of inconsistencies detected"
           
       - alert: ReconciliationStale
-        expr: (time() - alertmanager_last_reconciliation_timestamp_seconds) > 600
+        expr: (time() - alertmanager_sync_last_reconciliation_timestamp_seconds) > 600
         for: 5m
         annotations:
           summary: "No reconciliation in the last 10 minutes"

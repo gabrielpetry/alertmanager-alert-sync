@@ -12,7 +12,7 @@ The service exposes reconciliation metrics at the `/metrics` endpoint. These met
 
 ## Metrics List
 
-### alertmanager_reconciliation_total
+### alertmanager_sync_reconciliation_total
 
 **Type:** Counter
 
@@ -25,15 +25,15 @@ The service exposes reconciliation metrics at the `/metrics` endpoint. These met
 **Example queries:**
 ```promql
 # Reconciliation rate per minute
-rate(alertmanager_reconciliation_total[5m])
+rate(alertmanager_sync_reconciliation_total[5m])
 
 # Total reconciliations in the last hour
-increase(alertmanager_reconciliation_total[1h])
+increase(alertmanager_sync_reconciliation_total[1h])
 ```
 
 ---
 
-### alertmanager_reconciliation_failures_total
+### alertmanager_sync_reconciliation_failures_total
 
 **Type:** Counter
 
@@ -47,15 +47,15 @@ increase(alertmanager_reconciliation_total[1h])
 **Example queries:**
 ```promql
 # Failure rate
-rate(alertmanager_reconciliation_failures_total[5m])
+rate(alertmanager_sync_reconciliation_failures_total[5m])
 
 # Failure percentage
-100 * rate(alertmanager_reconciliation_failures_total[5m]) / rate(alertmanager_reconciliation_total[5m])
+100 * rate(alertmanager_sync_reconciliation_failures_total[5m]) / rate(alertmanager_sync_reconciliation_total[5m])
 ```
 
 ---
 
-### alertmanager_reconciliation_duration_seconds
+### alertmanager_sync_reconciliation_duration_seconds
 
 **Type:** Histogram
 
@@ -71,18 +71,18 @@ rate(alertmanager_reconciliation_failures_total[5m])
 **Example queries:**
 ```promql
 # Average duration
-rate(alertmanager_reconciliation_duration_seconds_sum[5m]) / rate(alertmanager_reconciliation_duration_seconds_count[5m])
+rate(alertmanager_sync_reconciliation_duration_seconds_sum[5m]) / rate(alertmanager_sync_reconciliation_duration_seconds_count[5m])
 
 # 95th percentile
-histogram_quantile(0.95, rate(alertmanager_reconciliation_duration_seconds_bucket[5m]))
+histogram_quantile(0.95, rate(alertmanager_sync_reconciliation_duration_seconds_bucket[5m]))
 
 # 99th percentile
-histogram_quantile(0.99, rate(alertmanager_reconciliation_duration_seconds_bucket[5m]))
+histogram_quantile(0.99, rate(alertmanager_sync_reconciliation_duration_seconds_bucket[5m]))
 ```
 
 ---
 
-### alertmanager_inconsistencies_found
+### alertmanager_sync_inconsistencies_found
 
 **Type:** Gauge
 
@@ -96,15 +96,15 @@ histogram_quantile(0.99, rate(alertmanager_reconciliation_duration_seconds_bucke
 **Example queries:**
 ```promql
 # Current inconsistencies
-alertmanager_inconsistencies_found
+alertmanager_sync_inconsistencies_found
 
 # Average over time
-avg_over_time(alertmanager_inconsistencies_found[1h])
+avg_over_time(alertmanager_sync_inconsistencies_found[1h])
 ```
 
 ---
 
-### alertmanager_inconsistencies_resolved_total
+### alertmanager_sync_inconsistencies_resolved_total
 
 **Type:** Counter
 
@@ -118,15 +118,15 @@ avg_over_time(alertmanager_inconsistencies_found[1h])
 **Example queries:**
 ```promql
 # Resolution rate per minute
-rate(alertmanager_inconsistencies_resolved_total[5m])
+rate(alertmanager_sync_inconsistencies_resolved_total[5m])
 
 # Total resolutions today
-increase(alertmanager_inconsistencies_resolved_total[1d])
+increase(alertmanager_sync_inconsistencies_resolved_total[1d])
 ```
 
 ---
 
-### alertmanager_inconsistencies_failed_resolve_total
+### alertmanager_sync_inconsistencies_failed_resolve_total
 
 **Type:** Counter
 
@@ -140,15 +140,15 @@ increase(alertmanager_inconsistencies_resolved_total[1d])
 **Example queries:**
 ```promql
 # Failed resolution rate
-rate(alertmanager_inconsistencies_failed_resolve_total[5m])
+rate(alertmanager_sync_inconsistencies_failed_resolve_total[5m])
 
 # Resolution success rate
-100 * rate(alertmanager_inconsistencies_resolved_total[5m]) / (rate(alertmanager_inconsistencies_resolved_total[5m]) + rate(alertmanager_inconsistencies_failed_resolve_total[5m]))
+100 * rate(alertmanager_sync_inconsistencies_resolved_total[5m]) / (rate(alertmanager_sync_inconsistencies_resolved_total[5m]) + rate(alertmanager_sync_inconsistencies_failed_resolve_total[5m]))
 ```
 
 ---
 
-### alertmanager_last_reconciliation_timestamp_seconds
+### alertmanager_sync_last_reconciliation_timestamp_seconds
 
 **Type:** Gauge
 
@@ -162,15 +162,15 @@ rate(alertmanager_inconsistencies_failed_resolve_total[5m])
 **Example queries:**
 ```promql
 # Time since last reconciliation (seconds)
-time() - alertmanager_last_reconciliation_timestamp_seconds
+time() - alertmanager_sync_last_reconciliation_timestamp_seconds
 
 # Alert if no reconciliation in 10 minutes
-(time() - alertmanager_last_reconciliation_timestamp_seconds) > 600
+(time() - alertmanager_sync_last_reconciliation_timestamp_seconds) > 600
 ```
 
 ---
 
-### alertmanager_last_reconciliation_success
+### alertmanager_sync_last_reconciliation_success
 
 **Type:** Gauge
 
@@ -184,10 +184,10 @@ time() - alertmanager_last_reconciliation_timestamp_seconds
 **Example queries:**
 ```promql
 # Current success status
-alertmanager_last_reconciliation_success
+alertmanager_sync_last_reconciliation_success
 
 # Alert if last reconciliation failed
-alertmanager_last_reconciliation_success == 0
+alertmanager_sync_last_reconciliation_success == 0
 ```
 
 ---
@@ -200,11 +200,11 @@ alertmanager_last_reconciliation_success == 0
 {
   "targets": [
     {
-      "expr": "rate(alertmanager_reconciliation_total[5m])",
+      "expr": "rate(alertmanager_sync_reconciliation_total[5m])",
       "legendFormat": "Reconciliation Rate"
     },
     {
-      "expr": "rate(alertmanager_reconciliation_failures_total[5m])",
+      "expr": "rate(alertmanager_sync_reconciliation_failures_total[5m])",
       "legendFormat": "Failure Rate"
     }
   ]
@@ -217,7 +217,7 @@ alertmanager_last_reconciliation_success == 0
 {
   "targets": [
     {
-      "expr": "alertmanager_inconsistencies_found",
+      "expr": "alertmanager_sync_inconsistencies_found",
       "legendFormat": "Inconsistencies"
     }
   ],
@@ -231,15 +231,15 @@ alertmanager_last_reconciliation_success == 0
 {
   "targets": [
     {
-      "expr": "histogram_quantile(0.50, rate(alertmanager_reconciliation_duration_seconds_bucket[5m]))",
+      "expr": "histogram_quantile(0.50, rate(alertmanager_sync_reconciliation_duration_seconds_bucket[5m]))",
       "legendFormat": "p50"
     },
     {
-      "expr": "histogram_quantile(0.95, rate(alertmanager_reconciliation_duration_seconds_bucket[5m]))",
+      "expr": "histogram_quantile(0.95, rate(alertmanager_sync_reconciliation_duration_seconds_bucket[5m]))",
       "legendFormat": "p95"
     },
     {
-      "expr": "histogram_quantile(0.99, rate(alertmanager_reconciliation_duration_seconds_bucket[5m]))",
+      "expr": "histogram_quantile(0.99, rate(alertmanager_sync_reconciliation_duration_seconds_bucket[5m]))",
       "legendFormat": "p99"
     }
   ]
@@ -257,7 +257,7 @@ groups:
   - name: alertmanager-sync-critical
     rules:
       - alert: ReconciliationFailing
-        expr: alertmanager_last_reconciliation_success == 0
+        expr: alertmanager_sync_last_reconciliation_success == 0
         for: 10m
         labels:
           severity: critical
@@ -266,7 +266,7 @@ groups:
           description: "The last reconciliation failed. Check service logs for details."
           
       - alert: ReconciliationStale
-        expr: (time() - alertmanager_last_reconciliation_timestamp_seconds) > 600
+        expr: (time() - alertmanager_sync_last_reconciliation_timestamp_seconds) > 600
         for: 5m
         labels:
           severity: critical
@@ -282,7 +282,7 @@ groups:
   - name: alertmanager-sync-warnings
     rules:
       - alert: HighInconsistencyRate
-        expr: alertmanager_inconsistencies_found > 10
+        expr: alertmanager_sync_inconsistencies_found > 10
         for: 15m
         labels:
           severity: warning
@@ -292,8 +292,8 @@ groups:
           
       - alert: HighResolutionFailureRate
         expr: |
-          rate(alertmanager_inconsistencies_failed_resolve_total[5m]) /
-          (rate(alertmanager_inconsistencies_resolved_total[5m]) + rate(alertmanager_inconsistencies_failed_resolve_total[5m])) > 0.1
+          rate(alertmanager_sync_inconsistencies_failed_resolve_total[5m]) /
+          (rate(alertmanager_sync_inconsistencies_resolved_total[5m]) + rate(alertmanager_sync_inconsistencies_failed_resolve_total[5m])) > 0.1
         for: 10m
         labels:
           severity: warning
@@ -303,7 +303,7 @@ groups:
           
       - alert: SlowReconciliation
         expr: |
-          histogram_quantile(0.95, rate(alertmanager_reconciliation_duration_seconds_bucket[5m])) > 30
+          histogram_quantile(0.95, rate(alertmanager_sync_reconciliation_duration_seconds_bucket[5m])) > 30
         for: 10m
         labels:
           severity: warning
@@ -364,7 +364,7 @@ Periodically review:
 
 **Symptoms:**
 ```promql
-(time() - alertmanager_last_reconciliation_timestamp_seconds) > 600
+(time() - alertmanager_sync_last_reconciliation_timestamp_seconds) > 600
 ```
 
 **Possible causes:**
@@ -383,7 +383,7 @@ Periodically review:
 
 **Symptoms:**
 ```promql
-rate(alertmanager_reconciliation_failures_total[5m]) > 0
+rate(alertmanager_sync_reconciliation_failures_total[5m]) > 0
 ```
 
 **Possible causes:**
@@ -403,7 +403,7 @@ rate(alertmanager_reconciliation_failures_total[5m]) > 0
 
 **Symptoms:**
 ```promql
-alertmanager_inconsistencies_found > 10
+alertmanager_sync_inconsistencies_found > 10
 ```
 
 **Possible causes:**
@@ -423,7 +423,7 @@ alertmanager_inconsistencies_found > 10
 
 **Symptoms:**
 ```promql
-histogram_quantile(0.95, rate(alertmanager_reconciliation_duration_seconds_bucket[5m])) > 30
+histogram_quantile(0.95, rate(alertmanager_sync_reconciliation_duration_seconds_bucket[5m])) > 30
 ```
 
 **Possible causes:**

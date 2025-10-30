@@ -40,21 +40,21 @@ func NewExporter() *Exporter {
 
 	reconciliationTotal := promauto.NewCounter(
 		prometheus.CounterOpts{
-			Name: "alertmanager_reconciliation_total",
+			Name: "alertmanager_sync_reconciliation_total",
 			Help: "Total number of reconciliation attempts",
 		},
 	)
 
 	reconciliationFailuresTotal := promauto.NewCounter(
 		prometheus.CounterOpts{
-			Name: "alertmanager_reconciliation_failures_total",
+			Name: "alertmanager_sync_reconciliation_failures_total",
 			Help: "Total number of failed reconciliation attempts",
 		},
 	)
 
 	reconciliationDuration := promauto.NewHistogram(
 		prometheus.HistogramOpts{
-			Name:    "alertmanager_reconciliation_duration_seconds",
+			Name:    "alertmanager_sync_reconciliation_duration_seconds",
 			Help:    "Duration of reconciliation operations in seconds",
 			Buckets: prometheus.DefBuckets,
 		},
@@ -62,35 +62,35 @@ func NewExporter() *Exporter {
 
 	inconsistenciesFound := promauto.NewGauge(
 		prometheus.GaugeOpts{
-			Name: "alertmanager_inconsistencies_found",
+			Name: "alertmanager_sync_inconsistencies_found",
 			Help: "Number of inconsistencies found in last reconciliation",
 		},
 	)
 
 	inconsistenciesResolved := promauto.NewCounter(
 		prometheus.CounterOpts{
-			Name: "alertmanager_inconsistencies_resolved_total",
+			Name: "alertmanager_sync_inconsistencies_resolved_total",
 			Help: "Total number of inconsistencies successfully resolved",
 		},
 	)
 
 	inconsistenciesFailedResolve := promauto.NewCounter(
 		prometheus.CounterOpts{
-			Name: "alertmanager_inconsistencies_failed_resolve_total",
+			Name: "alertmanager_sync_inconsistencies_failed_resolve_total",
 			Help: "Total number of inconsistencies that failed to resolve",
 		},
 	)
 
 	lastReconciliationTime := promauto.NewGauge(
 		prometheus.GaugeOpts{
-			Name: "alertmanager_last_reconciliation_timestamp_seconds",
+			Name: "alertmanager_sync_last_reconciliation_timestamp_seconds",
 			Help: "Timestamp of the last reconciliation attempt (Unix time)",
 		},
 	)
 
 	lastReconciliationSuccess := promauto.NewGauge(
 		prometheus.GaugeOpts{
-			Name: "alertmanager_last_reconciliation_success",
+			Name: "alertmanager_sync_last_reconciliation_success",
 			Help: "Whether the last reconciliation was successful (1=success, 0=failure)",
 		},
 	)
@@ -114,7 +114,7 @@ func NewExporter() *Exporter {
 	// Create alert state gauge
 	alertStateGauge := promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "alertmanager_alert_state",
+			Name: "alertmanager_sync_alert_state",
 			Help: "Current state of alerts from Alertmanager (1=active, value indicates if suppressed)",
 		},
 		allLabels,
@@ -122,21 +122,21 @@ func NewExporter() *Exporter {
 
 	alertExportTotal := promauto.NewCounter(
 		prometheus.CounterOpts{
-			Name: "alertmanager_alert_export_total",
+			Name: "alertmanager_sync_alert_export_total",
 			Help: "Total number of alert export attempts",
 		},
 	)
 
 	alertExportFailuresTotal := promauto.NewCounter(
 		prometheus.CounterOpts{
-			Name: "alertmanager_alert_export_failures_total",
+			Name: "alertmanager_sync_alert_export_failures_total",
 			Help: "Total number of failed alert export attempts",
 		},
 	)
 
 	lastAlertExportTime := promauto.NewGauge(
 		prometheus.GaugeOpts{
-			Name: "alertmanager_last_alert_export_timestamp_seconds",
+			Name: "alertmanager_sync_last_alert_export_timestamp_seconds",
 			Help: "Timestamp of the last alert export (Unix time)",
 		},
 	)
