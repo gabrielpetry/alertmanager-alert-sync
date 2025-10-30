@@ -58,6 +58,20 @@ func main() {
 		}
 	}
 
+	// Start background alert export loop
+	alertExportIntervalStr := os.Getenv("ALERT_EXPORT_INTERVAL")
+	if alertExportIntervalStr != "" {
+		interval, err := strconv.Atoi(alertExportIntervalStr)
+		if err != nil || interval <= 0 {
+			log.Printf("Invalid ALERT_EXPORT_INTERVAL value '%s', must be a positive integer (seconds)", alertExportIntervalStr)
+		} else {
+			go startAlertExportLoop(amClient, exporter, time.Duration(interval)*time.Second)
+			log.Printf("Background alert export enabled with interval: %d seconds", interval)
+		}
+	} else {
+		log.Println("Background alert export disabled (set ALERT_EXPORT_INTERVAL to enable)")
+	}
+
 	// Register HTTP handlers
 	http.HandleFunc("/metrics", srv.MetricsHandler)
 	http.HandleFunc("/healthz", srv.HealthzHandler)
@@ -118,4 +132,45 @@ func runReconciliation(reconciler *sync.Reconciler) {
 	} else {
 		log.Println("Reconciliation completed successfully")
 	}
+}
+
+// startAlertExportLoop runs the alert export process at regular intervals
+func startAlertExportLoop(amClient *alertmanager.Client, exporter *metrics.Exporter, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	log.Printf("Starting alert export loop with interval: %v", interval)
+
+	// Run immediately on startup
+	runAlertExport(amClient, exporter)
+
+	// Then run on interval
+	for range ticker.C {
+		runAlertExport(amClient, exporter)
+	}
+}
+
+// runAlertExport performs a single alert export cycle with error handling
+func runAlertExport(amClient *alertmanager.Client, exporter *metrics.Exporter) {
+	ctx := context.Background()
+	log.Println("Running scheduled alert export...")
+
+	// Fetch all alerts from Alertmanager
+	alerts, err := amClient.GetAllAlerts(ctx)
+	if err != nil {
+		log.Printf("Alert export failed: %v", err)
+		exporter.RecordAlertExportFailure()
+		return
+	}
+
+	log.Printf("Fetched %d alerts from Alertmanager", len(alerts))
+
+	// Export alerts as metrics
+	if err := exporter.ExportAlerts(alerts); err != nil {
+		log.Printf("Error exporting alerts: %v", err)
+		exporter.RecordAlertExportFailure()
+		return
+	}
+
+	log.Println("Alert export completed successfully")
 }

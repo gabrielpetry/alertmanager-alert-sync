@@ -2,8 +2,11 @@ package metrics
 
 import (
 	"log"
+	"os"
+	"strings"
 	"time"
 
+	"github.com/prometheus/alertmanager/api/v2/models"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -19,6 +22,16 @@ type Exporter struct {
 	inconsistenciesFailedResolve prometheus.Counter
 	lastReconciliationTime       prometheus.Gauge
 	lastReconciliationSuccess    prometheus.Gauge
+
+	// Alert state metrics
+	alertStateGauge          *prometheus.GaugeVec
+	alertExportTotal         prometheus.Counter
+	alertExportFailuresTotal prometheus.Counter
+	lastAlertExportTime      prometheus.Gauge
+
+	// Configuration for alert labels
+	alertLabels      []string
+	alertAnnotations []string
 }
 
 // NewExporter creates and initializes a new metrics exporter for reconciliation
@@ -82,6 +95,52 @@ func NewExporter() *Exporter {
 		},
 	)
 
+	// Parse alert labels and annotations from environment
+	alertLabels := parseEnvList("ALERTMANAGER_ALERTS_LABELS")
+	alertAnnotations := parseEnvList("ALERTMANAGER_ALERTS_ANNOTATIONS")
+
+	// Default labels that are always included
+	defaultLabels := []string{"alertname", "alertstate", "suppressed"}
+
+	// Combine all labels for the metric
+	allLabels := append(defaultLabels, alertLabels...)
+	allLabels = append(allLabels, alertAnnotations...)
+
+	log.Printf("Alert export configuration:")
+	log.Printf("  - Alert labels to export: %v", alertLabels)
+	log.Printf("  - Alert annotations to export: %v", alertAnnotations)
+	log.Printf("  - All metric labels: %v", allLabels)
+
+	// Create alert state gauge
+	alertStateGauge := promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "alertmanager_alert_state",
+			Help: "Current state of alerts from Alertmanager (1=active, value indicates if suppressed)",
+		},
+		allLabels,
+	)
+
+	alertExportTotal := promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "alertmanager_alert_export_total",
+			Help: "Total number of alert export attempts",
+		},
+	)
+
+	alertExportFailuresTotal := promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "alertmanager_alert_export_failures_total",
+			Help: "Total number of failed alert export attempts",
+		},
+	)
+
+	lastAlertExportTime := promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "alertmanager_last_alert_export_timestamp_seconds",
+			Help: "Timestamp of the last alert export (Unix time)",
+		},
+	)
+
 	return &Exporter{
 		reconciliationTotal:          reconciliationTotal,
 		reconciliationFailuresTotal:  reconciliationFailuresTotal,
@@ -91,7 +150,33 @@ func NewExporter() *Exporter {
 		inconsistenciesFailedResolve: inconsistenciesFailedResolve,
 		lastReconciliationTime:       lastReconciliationTime,
 		lastReconciliationSuccess:    lastReconciliationSuccess,
+		alertStateGauge:              alertStateGauge,
+		alertExportTotal:             alertExportTotal,
+		alertExportFailuresTotal:     alertExportFailuresTotal,
+		lastAlertExportTime:          lastAlertExportTime,
+		alertLabels:                  alertLabels,
+		alertAnnotations:             alertAnnotations,
 	}
+}
+
+// parseEnvList parses a comma-separated environment variable into a list of trimmed strings
+func parseEnvList(envVar string) []string {
+	value := os.Getenv(envVar)
+	if value == "" {
+		return []string{}
+	}
+
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+
+	return result
 }
 
 // RecordReconciliationStart records the start of a reconciliation cycle
@@ -129,4 +214,66 @@ func (e *Exporter) RecordInconsistencyResolved() {
 // RecordInconsistencyFailedResolve records a failed inconsistency resolution
 func (e *Exporter) RecordInconsistencyFailedResolve() {
 	e.inconsistenciesFailedResolve.Inc()
+}
+
+// ExportAlerts exports the current state of alerts as Prometheus metrics
+func (e *Exporter) ExportAlerts(alerts []*models.GettableAlert) error {
+	e.alertExportTotal.Inc()
+	e.lastAlertExportTime.SetToCurrentTime()
+
+	// Reset previous metrics to avoid stale data
+	e.alertStateGauge.Reset()
+
+	for _, alert := range alerts {
+		if err := e.exportAlert(alert); err != nil {
+			log.Printf("Error exporting alert %s: %v", alert.Labels["alertname"], err)
+			// Continue with other alerts even if one fails
+		}
+	}
+
+	return nil
+}
+
+// exportAlert exports a single alert as a Prometheus metric
+func (e *Exporter) exportAlert(alert *models.GettableAlert) error {
+	// Determine if alert is suppressed (silenced)
+	suppressed := "false"
+	if len(alert.Status.SilencedBy) > 0 {
+		suppressed = "true"
+	}
+
+	// Build metric labels
+	metricLabels := prometheus.Labels{
+		"alertname":  alert.Labels["alertname"],
+		"alertstate": *alert.Status.State,
+		"suppressed": suppressed,
+	}
+
+	// Add extra labels from alert labels
+	for _, label := range e.alertLabels {
+		if val, ok := alert.Labels[label]; ok {
+			metricLabels[label] = val
+		} else {
+			metricLabels[label] = ""
+		}
+	}
+
+	// Add extra labels from alert annotations
+	for _, annotation := range e.alertAnnotations {
+		if val, ok := alert.Annotations[annotation]; ok {
+			metricLabels[annotation] = val
+		} else {
+			metricLabels[annotation] = ""
+		}
+	}
+
+	// Set the gauge value to 1 (alert exists)
+	e.alertStateGauge.With(metricLabels).Set(1)
+
+	return nil
+}
+
+// RecordAlertExportFailure increments the alert export failure counter
+func (e *Exporter) RecordAlertExportFailure() {
+	e.alertExportFailuresTotal.Inc()
 }

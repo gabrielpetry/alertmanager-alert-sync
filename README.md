@@ -5,9 +5,11 @@ A Go service that automatically reconciles alerts between Prometheus Alertmanage
 ## Features
 
 - **Automatic Reconciliation**: Continuously reconciles alerts on a configurable interval
+- **Alert State Export**: Automatically exports all alert states as Prometheus metrics with suppression status
 - **Inconsistency Detection**: Finds alerts silenced in Alertmanager but still firing in Grafana IRM
 - **Automatic Resolution**: Resolves inconsistent alerts in Grafana IRM
-- **Comprehensive Metrics**: Exposes detailed Prometheus metrics for monitoring reconciliation health
+- **Comprehensive Metrics**: Exposes detailed Prometheus metrics for monitoring reconciliation health and alert states
+- **Flexible Label Configuration**: Choose which alert labels and annotations to export as metric labels
 - **Manual Trigger**: Optional HTTP endpoint to trigger immediate reconciliation
 - **Kubernetes-Ready**: Includes liveness and readiness probes
 - **Production-Ready**: Built with error handling, logging, and observability in mind
@@ -52,6 +54,9 @@ The application is structured following Go best practices:
 | `GRAFANA_IRM_URL` | Grafana IRM base URL | - | Yes |
 | `GRAFANA_IRM_TOKEN` | Grafana IRM API token | - | Yes |
 | `RECONCILE_INTERVAL` | Automatic reconciliation interval in seconds (0 or unset = disabled) | - | No |
+| `ALERT_EXPORT_INTERVAL` | Alert state export interval in seconds (0 or unset = disabled) | - | No |
+| `ALERTMANAGER_ALERTS_LABELS` | Comma-separated list of alert labels to export | - | No |
+| `ALERTMANAGER_ALERTS_ANNOTATIONS` | Comma-separated list of alert annotations to export | - | No |
 | `PORT` | HTTP server port | `8080` | No |
 
 ## Quick Reference
@@ -77,6 +82,9 @@ export ALERTMANAGER_HOST="localhost:9093"
 export GRAFANA_IRM_URL="https://your-grafana-irm.com"
 export GRAFANA_IRM_TOKEN="your-api-token"
 export RECONCILE_INTERVAL="300"  # Run reconciliation every 5 minutes
+export ALERT_EXPORT_INTERVAL="30"  # Export alert states every 30 seconds
+export ALERTMANAGER_ALERTS_LABELS="severity,cluster,namespace"
+export ALERTMANAGER_ALERTS_ANNOTATIONS="summary,description"
 ```
 
 2. **Run the application:**
@@ -124,7 +132,7 @@ Make sure to update the ConfigMap and Secret in `kubernetes/bundle.yaml` with yo
 
 Returns Prometheus metrics for the reconciliation process.
 
-**Metrics exported:**
+**Reconciliation Metrics:**
 
 - `alertmanager_reconciliation_total`: Total number of reconciliation attempts
 - `alertmanager_reconciliation_failures_total`: Total number of failed reconciliations
@@ -134,6 +142,13 @@ Returns Prometheus metrics for the reconciliation process.
 - `alertmanager_inconsistencies_failed_resolve_total`: Total number of inconsistencies that failed to resolve
 - `alertmanager_last_reconciliation_timestamp_seconds`: Timestamp of the last reconciliation (Unix time)
 - `alertmanager_last_reconciliation_success`: Whether the last reconciliation was successful (1=success, 0=failure)
+
+**Alert State Metrics:**
+
+- `alertmanager_alert_state`: Current state of each alert (labels: alertname, alertstate, suppressed, plus configured labels/annotations)
+- `alertmanager_alert_export_total`: Total number of alert export attempts
+- `alertmanager_alert_export_failures_total`: Total number of failed alert exports
+- `alertmanager_last_alert_export_timestamp_seconds`: Timestamp of the last alert export (Unix time)
 
 **Example Prometheus queries:**
 
@@ -149,6 +164,15 @@ alertmanager_inconsistencies_found
 
 # Time since last successful reconciliation
 time() - alertmanager_last_reconciliation_timestamp_seconds
+
+# Count of active alerts by severity
+sum(alertmanager_alert_state{alertstate="active"}) by (severity)
+
+# Count of suppressed alerts
+sum(alertmanager_alert_state{suppressed="true"})
+
+# Alerts by state
+sum(alertmanager_alert_state) by (alertstate, suppressed)
 ```
 
 ### `/reconcile`
@@ -183,7 +207,7 @@ Use this for:
 
 ## Use Cases
 
-### 1. Reconciliation Monitoring
+### 1. Metrics and Monitoring
 
 Scrape the `/metrics` endpoint with Prometheus to:
 - Monitor reconciliation success/failure rates
@@ -226,7 +250,34 @@ groups:
           summary: "No reconciliation in the last 10 minutes"
 ```
 
-### 2. Alert Reconciliation
+### 2. Alert State Monitoring
+
+The service can automatically export all alert states from Alertmanager as Prometheus metrics on a regular interval.
+
+**Automatic alert export:**
+
+Set the `ALERT_EXPORT_INTERVAL` environment variable to enable:
+
+```bash
+export ALERT_EXPORT_INTERVAL="30"  # Export every 30 seconds
+export ALERTMANAGER_ALERTS_LABELS="severity,cluster,namespace"
+export ALERTMANAGER_ALERTS_ANNOTATIONS="summary,description"
+```
+
+The alert export will:
+- Run immediately on startup
+- Continue running at the specified interval
+- Export each alert with its state (active, suppressed, etc.)
+- Include custom labels and annotations as metric labels
+- Provide visibility into suppressed/silenced alerts
+
+**Use cases:**
+- Monitor which alerts are currently suppressed
+- Track alert counts by severity, cluster, or any custom label
+- Create dashboards showing alert distribution
+- Alert on excessive suppressions
+
+### 3. Alert Reconciliation
 
 The service can automatically reconcile alerts between Alertmanager and Grafana IRM on a regular interval.
 
