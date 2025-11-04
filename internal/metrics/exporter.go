@@ -103,7 +103,7 @@ func NewExporter() *Exporter {
 	alertAnnotations := parseEnvList("ALERTMANAGER_ALERTS_ANNOTATIONS")
 
 	// Default labels that are always included
-	defaultLabels := []string{"alertname", "fingerprint", "suppressed", "acknowledged_by", "resolved_by", "silenced_by", "inhibited_by"}
+	defaultLabels := []string{"alertname", "fingerprint", "suppressed", "acknowledged_by", "resolved_by", "silenced_by", "inhibited_by", "alert_group_id"}
 
 	// Combine all labels for the metric
 	allLabels := append(defaultLabels, alertLabels...)
@@ -299,17 +299,22 @@ func (e *Exporter) exportAlert(ctx context.Context, alert *models.GettableAlert,
 		inhibitedBy = alert.Status.InhibitedBy[0]
 	}
 
-	// Extract acknowledged_by and resolved_by from Grafana (user emails)
+	// Extract acknowledged_by, resolved_by, and alert_group_id from Grafana
 	acknowledgedBy := ""
 	resolvedBy := ""
+	alertGroupID := ""
 
-	if grafanaGroup != nil && grafanaClient != nil {
-		// Fetch user emails from user IDs (with caching)
-		if grafanaGroup.AcknowledgedBy != "" {
-			acknowledgedBy = grafanaClient.GetUserEmail(grafanaGroup.AcknowledgedBy)
-		}
-		if grafanaGroup.ResolvedBy != "" {
-			resolvedBy = grafanaClient.GetUserEmail(grafanaGroup.ResolvedBy)
+	if grafanaGroup != nil {
+		alertGroupID = grafanaGroup.ID
+		
+		if grafanaClient != nil {
+			// Fetch user emails from user IDs (with caching)
+			if grafanaGroup.AcknowledgedBy != "" {
+				acknowledgedBy = grafanaClient.GetUserEmail(grafanaGroup.AcknowledgedBy)
+			}
+			if grafanaGroup.ResolvedBy != "" {
+				resolvedBy = grafanaClient.GetUserEmail(grafanaGroup.ResolvedBy)
+			}
 		}
 	}
 
@@ -322,6 +327,7 @@ func (e *Exporter) exportAlert(ctx context.Context, alert *models.GettableAlert,
 		"resolved_by":     resolvedBy,
 		"silenced_by":     silencedBy,
 		"inhibited_by":    inhibitedBy,
+		"alert_group_id":  alertGroupID,
 	}
 
 	// Add extra labels from alert labels
