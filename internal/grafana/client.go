@@ -7,12 +7,14 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 )
 
 const (
 	alertGroupsEndpoint  = "/api/v1/alert_groups"
 	resolveAlertEndpoint = "/api/v1/alert_groups/%s/resolve"
+	userEndpoint         = "/api/v1/users/%s"
 )
 
 // Client wraps the Grafana IRM API client
@@ -20,6 +22,8 @@ type Client struct {
 	baseURL    string
 	apiToken   string
 	httpClient *http.Client
+	userCache  map[string]*User
+	cacheMutex sync.RWMutex
 }
 
 // NewClient creates a new Grafana IRM client
@@ -41,6 +45,7 @@ func NewClient() (*Client, error) {
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
+		userCache: make(map[string]*User),
 	}, nil
 }
 
@@ -155,4 +160,73 @@ func (c *Client) ResolveAlertGroup(alertGroupID string) error {
 
 	log.Printf("Successfully resolved alert group: %s", alertGroupID)
 	return nil
+}
+
+// GetUser retrieves user information by user ID with caching
+func (c *Client) GetUser(userID string) (*User, error) {
+	if userID == "" {
+		return nil, nil
+	}
+
+	// Check cache first (read lock)
+	c.cacheMutex.RLock()
+	if user, exists := c.userCache[userID]; exists {
+		c.cacheMutex.RUnlock()
+		return user, nil
+	}
+	c.cacheMutex.RUnlock()
+
+	// User not in cache, fetch from API
+	url := fmt.Sprintf("%s%s", c.baseURL, fmt.Sprintf(userEndpoint, userID))
+	log.Printf("Fetching user from URL: %s", url)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	req.Header.Set("Authorization", c.apiToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("executing request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response: %w", err)
+	}
+
+	var user User
+	if err := json.Unmarshal(body, &user); err != nil {
+		return nil, fmt.Errorf("parsing response: %w", err)
+	}
+
+	// Store in cache (write lock)
+	c.cacheMutex.Lock()
+	c.userCache[userID] = &user
+	c.cacheMutex.Unlock()
+
+	log.Printf("Cached user %s (email: %s)", userID, user.Email)
+	return &user, nil
+}
+
+// GetUserEmail retrieves only the email for a user ID (with caching)
+func (c *Client) GetUserEmail(userID string) string {
+	user, err := c.GetUser(userID)
+	if err != nil {
+		log.Printf("Failed to fetch user %s: %v", userID, err)
+		return ""
+	}
+	if user == nil {
+		return ""
+	}
+	return user.Email
 }

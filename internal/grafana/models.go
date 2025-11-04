@@ -1,6 +1,60 @@
 package grafana
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
+
+// NullableTime represents a time that can be null or empty in JSON
+type NullableTime struct {
+	Time  time.Time
+	Valid bool
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for NullableTime
+func (nt *NullableTime) UnmarshalJSON(data []byte) error {
+	// Handle null
+	if string(data) == "null" {
+		nt.Valid = false
+		return nil
+	}
+
+	// Handle empty string
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		if s == "" {
+			nt.Valid = false
+			return nil
+		}
+	}
+
+	// Try to parse as time
+	var t time.Time
+	if err := json.Unmarshal(data, &t); err != nil {
+		nt.Valid = false
+		return nil
+	}
+
+	nt.Time = t
+	nt.Valid = true
+	return nil
+}
+
+// MarshalJSON implements custom JSON marshaling for NullableTime
+func (nt NullableTime) MarshalJSON() ([]byte, error) {
+	if !nt.Valid {
+		return []byte("null"), nil
+	}
+	return json.Marshal(nt.Time)
+}
+
+// User represents a Grafana IRM user
+type User struct {
+	ID        string `json:"id,omitempty"`
+	GrafanaID int    `json:"grafana_id,omitempty"`
+	Email     string `json:"email,omitempty"`
+	Username  string `json:"username,omitempty"`
+}
 
 // AlertGroupResponse represents the response from Grafana IRM alert groups endpoint
 type AlertGroupResponse struct {
@@ -22,17 +76,20 @@ type AlertGroup struct {
 	RouteID        string        `json:"route_id,omitempty"`
 	AlertsCount    int           `json:"alerts_count,omitempty"`
 	State          string        `json:"state,omitempty"`
-	CreatedAt      time.Time     `json:"created_at,omitempty"`
-	ResolvedAt     interface{}   `json:"resolved_at,omitempty"`
-	ResolvedBy     interface{}   `json:"resolved_by,omitempty"`
-	AcknowledgedAt interface{}   `json:"acknowledged_at,omitempty"`
-	AcknowledgedBy interface{}   `json:"acknowledged_by,omitempty"`
+	CreatedAt      NullableTime  `json:"created_at,omitempty"`
+	ResolvedAt     NullableTime  `json:"resolved_at,omitempty"`
+	ResolvedBy     string        `json:"resolved_by,omitempty"`
+	AcknowledgedAt NullableTime  `json:"acknowledged_at,omitempty"`
+	AcknowledgedBy string        `json:"acknowledged_by,omitempty"`
 	Labels         []interface{} `json:"labels,omitempty"`
 	Title          string        `json:"title,omitempty"`
 	Permalinks     Permalinks    `json:"permalinks,omitempty"`
-	SilencedAt     interface{}   `json:"silenced_at,omitempty"`
+	SilencedAt     NullableTime  `json:"silenced_at,omitempty"`
+	SilencedBy     string        `json:"silenced_by,omitempty"`
 	LastAlert      LastAlert     `json:"last_alert,omitempty"`
 }
+
+
 
 // Permalinks contains various URLs to access the alert group
 type Permalinks struct {
@@ -44,10 +101,10 @@ type Permalinks struct {
 
 // LastAlert contains details of the most recent alert in the group
 type LastAlert struct {
-	ID           string    `json:"id,omitempty"`
-	AlertGroupID string    `json:"alert_group_id,omitempty"`
-	CreatedAt    time.Time `json:"created_at,omitempty"`
-	Payload      Payload   `json:"payload,omitempty"`
+	ID           string       `json:"id,omitempty"`
+	AlertGroupID string       `json:"alert_group_id,omitempty"`
+	CreatedAt    NullableTime `json:"created_at,omitempty"`
+	Payload      Payload      `json:"payload,omitempty"`
 }
 
 // Payload contains the full alert payload from Alertmanager
@@ -68,13 +125,13 @@ type Payload struct {
 
 // Alert represents a single alert within a group
 type Alert struct {
-	EndsAt       time.Time   `json:"endsAt,omitempty"`
-	Labels       Labels      `json:"labels,omitempty"`
-	Status       string      `json:"status,omitempty"`
-	StartsAt     time.Time   `json:"startsAt,omitempty"`
-	Annotations  Annotations `json:"annotations,omitempty"`
-	Fingerprint  string      `json:"fingerprint,omitempty"`
-	GeneratorURL string      `json:"generatorURL,omitempty"`
+	EndsAt       NullableTime `json:"endsAt,omitempty"`
+	Labels       Labels       `json:"labels,omitempty"`
+	Status       string       `json:"status,omitempty"`
+	StartsAt     NullableTime `json:"startsAt,omitempty"`
+	Annotations  Annotations  `json:"annotations,omitempty"`
+	Fingerprint  string       `json:"fingerprint,omitempty"`
+	GeneratorURL string       `json:"generatorURL,omitempty"`
 }
 
 // Labels contains alert labels

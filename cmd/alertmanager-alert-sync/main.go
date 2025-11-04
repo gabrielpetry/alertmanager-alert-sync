@@ -50,26 +50,29 @@ func main() {
 			if err != nil || interval <= 0 {
 				log.Printf("Invalid RECONCILE_INTERVAL value '%s', must be a positive integer (seconds)", reconcileIntervalStr)
 			} else {
-				go startReconciliationLoop(reconciler, time.Duration(interval)*time.Second)
-				log.Printf("Background reconciliation enabled with interval: %d seconds", interval)
+				// Use optimized reconciliation that handles both sync and metrics export
+				go startOptimizedReconciliationLoop(reconciler, time.Duration(interval)*time.Second)
+				log.Printf("Optimized background reconciliation enabled with interval: %d seconds", interval)
+				log.Println("This includes both alert metrics export and silence synchronization")
 			}
 		} else {
 			log.Println("Background reconciliation disabled (set RECONCILE_INTERVAL to enable)")
 		}
-	}
-
-	// Start background alert export loop
-	alertExportIntervalStr := os.Getenv("ALERT_EXPORT_INTERVAL")
-	if alertExportIntervalStr != "" {
-		interval, err := strconv.Atoi(alertExportIntervalStr)
-		if err != nil || interval <= 0 {
-			log.Printf("Invalid ALERT_EXPORT_INTERVAL value '%s', must be a positive integer (seconds)", alertExportIntervalStr)
-		} else {
-			go startAlertExportLoop(amClient, exporter, time.Duration(interval)*time.Second)
-			log.Printf("Background alert export enabled with interval: %d seconds", interval)
-		}
 	} else {
-		log.Println("Background alert export disabled (set ALERT_EXPORT_INTERVAL to enable)")
+		// Fallback to alert export only if Grafana is not configured
+		alertExportIntervalStr := os.Getenv("ALERT_EXPORT_INTERVAL")
+		if alertExportIntervalStr != "" {
+			interval, err := strconv.Atoi(alertExportIntervalStr)
+			if err != nil || interval <= 0 {
+				log.Printf("Invalid ALERT_EXPORT_INTERVAL value '%s', must be a positive integer (seconds)", alertExportIntervalStr)
+			} else {
+				go startAlertExportLoop(amClient, exporter, time.Duration(interval)*time.Second)
+				log.Printf("Background alert export enabled with interval: %d seconds", interval)
+				log.Println("Note: Grafana IRM integration disabled - only basic metrics available")
+			}
+		} else {
+			log.Println("Background alert export disabled (set ALERT_EXPORT_INTERVAL to enable)")
+		}
 	}
 
 	// Register HTTP handlers
@@ -134,6 +137,35 @@ func runReconciliation(reconciler *sync.Reconciler) {
 	}
 }
 
+// startOptimizedReconciliationLoop runs the optimized reconciliation process at regular intervals
+// This handles both metrics export and silence synchronization in parallel
+func startOptimizedReconciliationLoop(reconciler *sync.Reconciler, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	log.Printf("Starting optimized reconciliation loop with interval: %v", interval)
+
+	// Run immediately on startup
+	runOptimizedReconciliation(reconciler)
+
+	// Then run on interval
+	for range ticker.C {
+		runOptimizedReconciliation(reconciler)
+	}
+}
+
+// runOptimizedReconciliation performs a single optimized reconciliation cycle with error handling
+func runOptimizedReconciliation(reconciler *sync.Reconciler) {
+	ctx := context.Background()
+	log.Println("Running scheduled optimized reconciliation...")
+
+	if err := reconciler.ReconcileAndResolveOptimized(ctx); err != nil {
+		log.Printf("Optimized reconciliation failed: %v", err)
+	} else {
+		log.Println("Optimized reconciliation completed successfully")
+	}
+}
+
 // startAlertExportLoop runs the alert export process at regular intervals
 func startAlertExportLoop(amClient *alertmanager.Client, exporter *metrics.Exporter, interval time.Duration) {
 	ticker := time.NewTicker(interval)
@@ -166,7 +198,7 @@ func runAlertExport(amClient *alertmanager.Client, exporter *metrics.Exporter) {
 	log.Printf("Fetched %d alerts from Alertmanager", len(alerts))
 
 	// Export alerts as metrics
-	if err := exporter.ExportAlerts(alerts); err != nil {
+	if err := exporter.ExportAlerts(ctx, alerts, amClient); err != nil {
 		log.Printf("Error exporting alerts: %v", err)
 		exporter.RecordAlertExportFailure()
 		return

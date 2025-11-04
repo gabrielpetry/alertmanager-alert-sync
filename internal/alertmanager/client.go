@@ -4,16 +4,20 @@ import (
 	"context"
 	"log"
 	"os"
+	"sync"
 
 	"github.com/go-openapi/strfmt"
 	amclient "github.com/prometheus/alertmanager/api/v2/client"
 	"github.com/prometheus/alertmanager/api/v2/client/alert"
+	"github.com/prometheus/alertmanager/api/v2/client/silence"
 	"github.com/prometheus/alertmanager/api/v2/models"
 )
 
 // Client wraps the Alertmanager API client
 type Client struct {
-	api *amclient.AlertmanagerAPI
+	api          *amclient.AlertmanagerAPI
+	silenceCache map[string]*models.GettableSilence
+	cacheMutex   sync.RWMutex
 }
 
 // NewClient creates a new Alertmanager client
@@ -29,7 +33,8 @@ func NewClient() *Client {
 	log.Printf("Alertmanager client initialized for host: %s", alertmanagerHost)
 
 	return &Client{
-		api: api,
+		api:          api,
+		silenceCache: make(map[string]*models.GettableSilence),
 	}
 }
 
@@ -81,4 +86,50 @@ func (c *Client) GetSilencedFiringAlerts(ctx context.Context) ([]*models.Gettabl
 	}
 
 	return silencedFiring, nil
+}
+
+// GetSilence retrieves silence details by silence ID with caching
+func (c *Client) GetSilence(ctx context.Context, silenceID string) (*models.GettableSilence, error) {
+	if silenceID == "" {
+		return nil, nil
+	}
+
+	// Check cache first (read lock)
+	c.cacheMutex.RLock()
+	if silence, exists := c.silenceCache[silenceID]; exists {
+		c.cacheMutex.RUnlock()
+		return silence, nil
+	}
+	c.cacheMutex.RUnlock()
+
+	// Silence not in cache, fetch from API
+	params := silence.NewGetSilenceParams().
+		WithSilenceID(strfmt.UUID(silenceID)).
+		WithContext(ctx)
+
+	ok, err := c.api.Silence.GetSilence(params)
+	if err != nil {
+		log.Printf("Failed to fetch silence %s: %v", silenceID, err)
+		return nil, err
+	}
+
+	// Store in cache (write lock)
+	c.cacheMutex.Lock()
+	c.silenceCache[silenceID] = ok.Payload
+	c.cacheMutex.Unlock()
+
+	log.Printf("Cached silence %s (author: %s)", silenceID, *ok.Payload.CreatedBy)
+	return ok.Payload, nil
+}
+
+// GetSilenceAuthor retrieves the author of a silence by silence ID (with caching)
+func (c *Client) GetSilenceAuthor(ctx context.Context, silenceID string) string {
+	silence, err := c.GetSilence(ctx, silenceID)
+	if err != nil || silence == nil {
+		return ""
+	}
+	if silence.CreatedBy != nil {
+		return *silence.CreatedBy
+	}
+	return ""
 }

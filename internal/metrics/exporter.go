@@ -1,11 +1,14 @@
 package metrics
 
 import (
+	"context"
 	"log"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/gabrielpetry/alertmanager-alert-sync/internal/alertmanager"
+	"github.com/gabrielpetry/alertmanager-alert-sync/internal/grafana"
 	"github.com/prometheus/alertmanager/api/v2/models"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -100,7 +103,7 @@ func NewExporter() *Exporter {
 	alertAnnotations := parseEnvList("ALERTMANAGER_ALERTS_ANNOTATIONS")
 
 	// Default labels that are always included
-	defaultLabels := []string{"alertname", "suppressed"}
+	defaultLabels := []string{"alertname", "fingerprint", "suppressed", "acknowledged_by", "resolved_by", "silenced_by", "inhibited_by"}
 
 	// Combine all labels for the metric
 	allLabels := append(defaultLabels, alertLabels...)
@@ -217,7 +220,7 @@ func (e *Exporter) RecordInconsistencyFailedResolve() {
 }
 
 // ExportAlerts exports the current state of alerts as Prometheus metrics
-func (e *Exporter) ExportAlerts(alerts []*models.GettableAlert) error {
+func (e *Exporter) ExportAlerts(ctx context.Context, alerts []*models.GettableAlert, amClient *alertmanager.Client) error {
 	e.alertExportTotal.Inc()
 	e.lastAlertExportTime.SetToCurrentTime()
 
@@ -225,7 +228,41 @@ func (e *Exporter) ExportAlerts(alerts []*models.GettableAlert) error {
 	e.alertStateGauge.Reset()
 
 	for _, alert := range alerts {
-		if err := e.exportAlert(alert); err != nil {
+		if err := e.exportAlert(ctx, alert, nil, nil, amClient); err != nil {
+			log.Printf("Error exporting alert %s: %v", alert.Labels["alertname"], err)
+			// Continue with other alerts even if one fails
+		}
+	}
+
+	return nil
+}
+
+// ExportAlertsWithGrafana exports alerts with additional information from Grafana IRM
+func (e *Exporter) ExportAlertsWithGrafana(ctx context.Context, alerts []*models.GettableAlert, grafanaAlertGroups []grafana.AlertGroup, grafanaClient *grafana.Client, amClient *alertmanager.Client) error {
+	e.alertExportTotal.Inc()
+	e.lastAlertExportTime.SetToCurrentTime()
+
+	// Reset previous metrics to avoid stale data
+	e.alertStateGauge.Reset()
+
+	// Build a map of alert fingerprints to Grafana alert groups for quick lookup
+	grafanaMap := make(map[string]*grafana.AlertGroup)
+	for i := range grafanaAlertGroups {
+		group := &grafanaAlertGroups[i]
+		for _, alert := range group.LastAlert.Payload.Alerts {
+			if alert.Fingerprint != "" {
+				grafanaMap[alert.Fingerprint] = group
+			}
+		}
+	}
+
+	for _, alert := range alerts {
+		var grafanaGroup *grafana.AlertGroup
+		if alert.Fingerprint != nil {
+			grafanaGroup = grafanaMap[*alert.Fingerprint]
+		}
+
+		if err := e.exportAlert(ctx, alert, grafanaGroup, grafanaClient, amClient); err != nil {
 			log.Printf("Error exporting alert %s: %v", alert.Labels["alertname"], err)
 			// Continue with other alerts even if one fails
 		}
@@ -235,17 +272,56 @@ func (e *Exporter) ExportAlerts(alerts []*models.GettableAlert) error {
 }
 
 // exportAlert exports a single alert as a Prometheus metric
-func (e *Exporter) exportAlert(alert *models.GettableAlert) error {
+func (e *Exporter) exportAlert(ctx context.Context, alert *models.GettableAlert, grafanaGroup *grafana.AlertGroup, grafanaClient *grafana.Client, amClient *alertmanager.Client) error {
+	// Extract alert fingerprint
+	fingerprint := ""
+	if alert.Fingerprint != nil {
+		fingerprint = *alert.Fingerprint
+	}
+
 	// Determine if alert is suppressed (silenced)
 	suppressed := "false"
+	silencedBy := ""
+
 	if len(alert.Status.SilencedBy) > 0 {
 		suppressed = "true"
+
+		// Get the author of the first silence (with caching)
+		if amClient != nil {
+			silencedBy = amClient.GetSilenceAuthor(ctx, alert.Status.SilencedBy[0])
+		}
+	}
+
+	// Extract inhibited_by (fingerprint of inhibiting alert)
+	inhibitedBy := ""
+	if len(alert.Status.InhibitedBy) > 0 {
+		// Use the first inhibiting alert's fingerprint
+		inhibitedBy = alert.Status.InhibitedBy[0]
+	}
+
+	// Extract acknowledged_by and resolved_by from Grafana (user emails)
+	acknowledgedBy := ""
+	resolvedBy := ""
+
+	if grafanaGroup != nil && grafanaClient != nil {
+		// Fetch user emails from user IDs (with caching)
+		if grafanaGroup.AcknowledgedBy != "" {
+			acknowledgedBy = grafanaClient.GetUserEmail(grafanaGroup.AcknowledgedBy)
+		}
+		if grafanaGroup.ResolvedBy != "" {
+			resolvedBy = grafanaClient.GetUserEmail(grafanaGroup.ResolvedBy)
+		}
 	}
 
 	// Build metric labels
 	metricLabels := prometheus.Labels{
-		"alertname":  alert.Labels["alertname"],
-		"suppressed": suppressed,
+		"alertname":       alert.Labels["alertname"],
+		"fingerprint":     fingerprint,
+		"suppressed":      suppressed,
+		"acknowledged_by": acknowledgedBy,
+		"resolved_by":     resolvedBy,
+		"silenced_by":     silencedBy,
+		"inhibited_by":    inhibitedBy,
 	}
 
 	// Add extra labels from alert labels
