@@ -225,7 +225,7 @@ func (r *Reconciler) ReconcileAndResolveOptimized(ctx context.Context) error {
 		// Build a map of alert fingerprints from Grafana IRM for quick lookup
 		grafanaFingerprints := make(map[string]string)
 		for _, group := range grafanaResult.grafanaAlertGroups {
-			if group.State == "firing" {
+			if group.State != "resolved" {
 				for _, alert := range group.LastAlert.Payload.Alerts {
 					if alert.Fingerprint != "" {
 						grafanaFingerprints[alert.Fingerprint] = group.ID
