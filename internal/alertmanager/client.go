@@ -38,21 +38,6 @@ func NewClient() *Client {
 	}
 }
 
-// GetFiringAlerts fetches only firing alerts from Alertmanager
-func (c *Client) GetFiringAlerts(ctx context.Context) ([]*models.GettableAlert, error) {
-	active := true
-	params := alert.NewGetAlertsParams().
-		WithActive(&active).
-		WithContext(ctx)
-
-	ok, err := c.api.Alert.GetAlerts(params)
-	if err != nil {
-		return nil, err
-	}
-
-	return ok.Payload, nil
-}
-
 // GetAllAlerts fetches all alerts from Alertmanager, including resolved and silenced
 func (c *Client) GetAllAlerts(ctx context.Context) ([]*models.GettableAlert, error) {
 	params := alert.NewGetAlertsParams().
@@ -64,28 +49,6 @@ func (c *Client) GetAllAlerts(ctx context.Context) ([]*models.GettableAlert, err
 	}
 
 	return ok.Payload, nil
-}
-
-// GetSilencedFiringAlerts retrieves alerts that are currently firing but have been silenced
-// These alerts exist in Alertmanager but are not actively notifying due to silences
-func (c *Client) GetSilencedFiringAlerts(ctx context.Context) ([]*models.GettableAlert, error) {
-	allAlerts, err := c.GetAllAlerts(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	var silencedFiring []*models.GettableAlert
-	for _, alert := range allAlerts {
-		// Check if alert is firing and has silences
-		if alert.Status != nil &&
-			*alert.Status.State == "suppressed" &&
-			len(alert.Status.SilencedBy) > 0 {
-			// Append to silenced firing alerts
-			silencedFiring = append(silencedFiring, alert)
-		}
-	}
-
-	return silencedFiring, nil
 }
 
 // GetSilence retrieves silence details by silence ID with caching
@@ -132,4 +95,28 @@ func (c *Client) GetSilenceAuthor(ctx context.Context, silenceID string) string 
 		return *silence.CreatedBy
 	}
 	return ""
+}
+
+// CreateSilence creates a new silence in Alertmanager
+func (c *Client) CreateSilence(ctx context.Context, silenceSpec *models.PostableSilence) (string, error) {
+	params := silence.NewPostSilencesParams().
+		WithSilence(silenceSpec).
+		WithContext(ctx)
+
+	ok, err := c.api.Silence.PostSilences(params)
+	if err != nil {
+		return "", err
+	}
+
+	silenceID := ok.Payload.SilenceID
+	log.Printf("Created silence %s (author: %s, comment: %s)", silenceID, *silenceSpec.CreatedBy, *silenceSpec.Comment)
+	return silenceID, nil
+}
+
+// IsAlertSilenced checks if an alert is currently silenced in Alertmanager
+func (c *Client) IsAlertSilenced(alert *models.GettableAlert) bool {
+	if alert.Status == nil {
+		return false
+	}
+	return len(alert.Status.SilencedBy) > 0
 }

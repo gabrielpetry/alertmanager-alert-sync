@@ -57,6 +57,9 @@ The application is structured following Go best practices:
 | `ALERT_EXPORT_INTERVAL` | Alert state export interval in seconds (0 or unset = disabled) | - | No |
 | `ALERTMANAGER_ALERTS_LABELS` | Comma-separated list of alert labels to export | - | No |
 | `ALERTMANAGER_ALERTS_ANNOTATIONS` | Comma-separated list of alert annotations to export | - | No |
+| `WEBHOOK_USERNAME` | Basic auth username for webhook endpoint | - | Yes (if using webhook) |
+| `WEBHOOK_PASSWORD` | Basic auth password for webhook endpoint | - | Yes (if using webhook) |
+| `WEBHOOK_EMAIL_ALLOWLIST` | Comma-separated list of allowed email addresses for webhook | - | No |
 | `PORT` | HTTP server port | `8080` | No |
 
 ## Quick Reference
@@ -99,6 +102,7 @@ go run cmd/alertmanager-alert-sync/main.go
 - Liveness: `http://localhost:8080/healthz`
 - Readiness: `http://localhost:8080/readyz`
 - Manual Reconcile: `http://localhost:8080/reconcile`
+- Webhook: `http://localhost:8080/webhook` (requires basic auth)
 
 ### Docker
 
@@ -127,6 +131,50 @@ kubectl apply -f kubernetes/bundle.yaml
 Make sure to update the ConfigMap and Secret in `kubernetes/bundle.yaml` with your configuration.
 
 ## API Endpoints
+
+### `/webhook`
+
+Receives webhook events from Grafana IRM for silence management. **Requires basic authentication.**
+
+**Configuration:**
+
+```bash
+export WEBHOOK_USERNAME="your-username"
+export WEBHOOK_PASSWORD="your-secure-password"
+export WEBHOOK_EMAIL_ALLOWLIST="admin@company.com,oncall@company.com"
+```
+
+**Behavior:**
+
+When a silence event is received from Grafana IRM:
+
+1. **If event.type is not "silence"**: Event is ignored
+2. **If user email is NOT in allowlist**: Alert group is automatically unsilenced in Grafana
+3. **If user email IS in allowlist AND event.until is present**: Silence is created in Alertmanager with:
+   - Matchers from the alert labels
+   - Duration from event.time to event.until
+   - Author set to the user's email
+   - Comment including alert group ID, title, and automation note
+
+**Example webhook payload:**
+
+See [docs/WEBHOOK.md](docs/WEBHOOK.md) for the complete payload schema.
+
+**Testing the webhook:**
+
+```bash
+curl -X POST http://localhost:8080/webhook \
+  -u username:password \
+  -H "Content-Type: application/json" \
+  -d @webhook_payload.json
+```
+
+**Grafana IRM Configuration:**
+
+1. Go to Grafana IRM Settings → Webhooks
+2. Create a new webhook with URL: `https://your-service:8080/webhook`
+3. Set authentication to Basic Auth with your credentials
+4. Enable for "Silence" events
 
 ### `/metrics`
 

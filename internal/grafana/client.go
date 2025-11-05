@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	alertGroupsEndpoint  = "/api/v1/alert_groups"
-	resolveAlertEndpoint = "/api/v1/alert_groups/%s/resolve"
-	userEndpoint         = "/api/v1/users/%s"
+	alertGroupsEndpoint   = "/api/v1/alert_groups"
+	resolveAlertEndpoint  = "/api/v1/alert_groups/%s/resolve"
+	unsilenceAlertEndpoint = "/api/v1/alert_groups/%s/unsilence"
+	userEndpoint          = "/api/v1/users/%s"
 )
 
 // Client wraps the Grafana IRM API client
@@ -47,55 +48,6 @@ func NewClient() (*Client, error) {
 		},
 		userCache: make(map[string]*User),
 	}, nil
-}
-
-// GetFiringAlertGroups retrieves all firing alert groups from Grafana IRM
-func (c *Client) GetFiringAlertGroups() ([]AlertGroup, error) {
-	url := fmt.Sprintf("%s%s", c.baseURL, alertGroupsEndpoint)
-	log.Printf("Fetching alert groups from URL: %s", url)
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-
-	// Set headers
-	req.Header.Set("Authorization", c.apiToken)
-	req.Header.Set("Content-Type", "application/json")
-
-	// Execute request
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("executing request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Check response status
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	// Parse response
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading response: %w", err)
-	}
-
-	var response AlertGroupResponse
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("parsing response: %w", err)
-	}
-
-	// Filter only firing alerts
-	firing := make([]AlertGroup, 0)
-	for _, alertGroup := range response.Results {
-		if alertGroup.State == "firing" {
-			firing = append(firing, alertGroup)
-		}
-	}
-
-	return firing, nil
 }
 
 // GetAllAlertGroups retrieves all alert groups from Grafana IRM (firing, resolved, etc.)
@@ -159,6 +111,34 @@ func (c *Client) ResolveAlertGroup(alertGroupID string) error {
 	}
 
 	log.Printf("Successfully resolved alert group: %s", alertGroupID)
+	return nil
+}
+
+// UnsilenceAlertGroup unsilences an alert group in Grafana IRM
+func (c *Client) UnsilenceAlertGroup(alertGroupID string) error {
+	url := fmt.Sprintf("%s%s", c.baseURL, fmt.Sprintf(unsilenceAlertEndpoint, alertGroupID))
+	log.Printf("Unsilencing alert group at URL: %s", url)
+
+	req, err := http.NewRequest("POST", url, nil)
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+
+	req.Header.Set("Authorization", c.apiToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("executing request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	log.Printf("Successfully unsilenced alert group: %s", alertGroupID)
 	return nil
 }
 

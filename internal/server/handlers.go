@@ -45,7 +45,7 @@ func (s *Server) MetricsHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) ReconcileHandler(w http.ResponseWriter, r *http.Request) {
 	log.Println("Reconcile endpoint called...")
 
-	err := s.reconciler.ReconcileAndResolve(r.Context())
+	err := s.reconciler.ReconcileAndResolveOptimized(r.Context())
 	if err != nil {
 		log.Printf("Error during reconciliation: %v", err)
 		http.Error(w, "Error during reconciliation", http.StatusInternalServerError)

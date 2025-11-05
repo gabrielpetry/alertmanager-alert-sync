@@ -19,20 +19,28 @@ func (nt *NullableTime) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	// Handle empty string
+	// Try to unmarshal as string (Grafana API returns timestamps as strings)
 	var s string
-	if err := json.Unmarshal(data, &s); err == nil {
-		if s == "" {
-			nt.Valid = false
-			return nil
-		}
+	if err := json.Unmarshal(data, &s); err != nil {
+		nt.Valid = false
+		return err
 	}
 
-	// Try to parse as time
-	var t time.Time
-	if err := json.Unmarshal(data, &t); err != nil {
+	// Handle empty string
+	if s == "" {
 		nt.Valid = false
 		return nil
+	}
+
+	// Parse the time string (RFC3339Nano format: 2020-05-19T12:37:01.430444Z)
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		// Try RFC3339 without nanoseconds
+		t, err = time.Parse(time.RFC3339, s)
+		if err != nil {
+			nt.Valid = false
+			return err
+		}
 	}
 
 	nt.Time = t

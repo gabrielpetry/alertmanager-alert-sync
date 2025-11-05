@@ -42,6 +42,12 @@ func main() {
 	// Initialize server with all dependencies
 	srv := server.NewServer(amClient, grafanaClient, exporter, reconciler)
 
+	// Initialize webhook handler if Grafana client is available
+	var webhookHandler *server.WebhookHandler
+	if grafanaClient != nil {
+		webhookHandler = server.NewWebhookHandler(amClient, grafanaClient)
+	}
+
 	// Start background reconciliation if enabled
 	if reconciler != nil {
 		reconcileIntervalStr := os.Getenv("RECONCILE_INTERVAL")
@@ -76,13 +82,18 @@ func main() {
 	}
 
 	// Register HTTP handlers
-	http.HandleFunc("/metrics", srv.MetricsHandler)
-	http.HandleFunc("/healthz", srv.HealthzHandler)
-	http.HandleFunc("/readyz", srv.ReadyzHandler)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/metrics", srv.MetricsHandler)
+	mux.HandleFunc("/healthz", srv.HealthzHandler)
+	mux.HandleFunc("/readyz", srv.ReadyzHandler)
 
-	// Only register reconcile endpoint if Grafana client is available
+	// Only register reconcile and webhook endpoints if Grafana client is available
 	if grafanaClient != nil {
-		http.HandleFunc("/reconcile", srv.ReconcileHandler)
+		mux.HandleFunc("/reconcile", srv.ReconcileHandler)
+		if webhookHandler != nil {
+			webhookHandler.RegisterRoutes(mux)
+			log.Println("Webhook endpoint enabled at /webhook (requires basic auth)")
+		}
 		log.Println("Grafana IRM integration enabled")
 	} else {
 		log.Println("Grafana IRM integration disabled")
@@ -102,38 +113,13 @@ func main() {
 	log.Printf("  - /readyz: Readiness probe")
 	if grafanaClient != nil {
 		log.Printf("  - /reconcile: Trigger manual reconciliation")
+		if webhookHandler != nil {
+			log.Printf("  - /webhook: Grafana IRM webhook endpoint (POST, basic auth required)")
+		}
 	}
 
-	if err := http.ListenAndServe(fmt.Sprintf(":%s", port), nil); err != nil {
+	if err := http.ListenAndServe(fmt.Sprintf(":%s", port), mux); err != nil {
 		log.Fatal(err)
-	}
-}
-
-// startReconciliationLoop runs the reconciliation process at regular intervals
-func startReconciliationLoop(reconciler *sync.Reconciler, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	log.Printf("Starting reconciliation loop with interval: %v", interval)
-
-	// Run immediately on startup
-	runReconciliation(reconciler)
-
-	// Then run on interval
-	for range ticker.C {
-		runReconciliation(reconciler)
-	}
-}
-
-// runReconciliation performs a single reconciliation cycle with error handling
-func runReconciliation(reconciler *sync.Reconciler) {
-	ctx := context.Background()
-	log.Println("Running scheduled reconciliation...")
-
-	if err := reconciler.ReconcileAndResolve(ctx); err != nil {
-		log.Printf("Reconciliation failed: %v", err)
-	} else {
-		log.Println("Reconciliation completed successfully")
 	}
 }
 
@@ -206,3 +192,5 @@ func runAlertExport(amClient *alertmanager.Client, exporter *metrics.Exporter) {
 
 	log.Println("Alert export completed successfully")
 }
+
+// startOptimizedReconciliationLoop runs the optimized reconciliation process at regular intervals
