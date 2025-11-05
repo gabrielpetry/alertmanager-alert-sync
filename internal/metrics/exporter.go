@@ -245,21 +245,25 @@ func (e *Exporter) ExportAlertsWithGrafana(ctx context.Context, alerts []*models
 	// Reset previous metrics to avoid stale data
 	e.alertStateGauge.Reset()
 
-	// Build a map of alert fingerprints to Grafana alert groups for quick lookup
-	grafanaMap := make(map[string]*grafana.AlertGroup)
-	for i := range grafanaAlertGroups {
-		group := &grafanaAlertGroups[i]
-		for _, alert := range group.LastAlert.Payload.Alerts {
-			if alert.Fingerprint != "" {
-				grafanaMap[alert.Fingerprint] = group
-			}
-		}
-	}
-
 	for _, alert := range alerts {
 		var grafanaGroup *grafana.AlertGroup
+		
+		// Find the matching Grafana alert group by searching through all groups
 		if alert.Fingerprint != nil {
-			grafanaGroup = grafanaMap[*alert.Fingerprint]
+			alertFingerprint := *alert.Fingerprint
+			for i := range grafanaAlertGroups {
+				group := &grafanaAlertGroups[i]
+				// Check if this alert's fingerprint exists in this group
+				for _, gAlert := range group.LastAlert.Payload.Alerts {
+					if gAlert.Fingerprint == alertFingerprint {
+						grafanaGroup = group
+						break
+					}
+				}
+				if grafanaGroup != nil {
+					break
+				}
+			}
 		}
 
 		if err := e.exportAlert(ctx, alert, grafanaGroup, grafanaClient, amClient); err != nil {
