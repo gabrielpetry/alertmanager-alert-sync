@@ -103,7 +103,7 @@ func NewExporter() *Exporter {
 	alertAnnotations := parseEnvList("ALERTMANAGER_ALERTS_ANNOTATIONS")
 
 	// Default labels that are always included
-	defaultLabels := []string{"alertname", "fingerprint", "suppressed", "acknowledged_by", "resolved_by", "silenced_by", "inhibited_by", "alert_group_id"}
+	defaultLabels := []string{"alertname", "fingerprint", "suppressed", "acknowledged_by", "resolved_by", "silenced_by", "inhibited_by", "alert_group_id", "acknowledged_at", "created_at", "resolved_at"}
 
 	// Combine all labels for the metric
 	allLabels := append(defaultLabels, alertLabels...)
@@ -219,24 +219,6 @@ func (e *Exporter) RecordInconsistencyFailedResolve() {
 	e.inconsistenciesFailedResolve.Inc()
 }
 
-// ExportAlerts exports the current state of alerts as Prometheus metrics
-func (e *Exporter) ExportAlerts(ctx context.Context, alerts []*models.GettableAlert, amClient *alertmanager.Client) error {
-	e.alertExportTotal.Inc()
-	e.lastAlertExportTime.SetToCurrentTime()
-
-	// Reset previous metrics to avoid stale data
-	e.alertStateGauge.Reset()
-
-	for _, alert := range alerts {
-		if err := e.exportAlert(ctx, alert, nil, nil, amClient); err != nil {
-			log.Printf("Error exporting alert %s: %v", alert.Labels["alertname"], err)
-			// Continue with other alerts even if one fails
-		}
-	}
-
-	return nil
-}
-
 // ExportAlertsWithGrafana exports alerts with additional information from Grafana IRM
 func (e *Exporter) ExportAlertsWithGrafana(ctx context.Context, alerts []*models.GettableAlert, grafanaAlertGroups []grafana.AlertGroup, grafanaClient *grafana.Client, amClient *alertmanager.Client) error {
 	e.alertExportTotal.Inc()
@@ -303,13 +285,27 @@ func (e *Exporter) exportAlert(ctx context.Context, alert *models.GettableAlert,
 		inhibitedBy = alert.Status.InhibitedBy[0]
 	}
 
-	// Extract acknowledged_by, resolved_by, and alert_group_id from Grafana
+	// Extract acknowledged_by, resolved_by, alert_group_id and timestamps from Grafana
 	acknowledgedBy := ""
 	resolvedBy := ""
 	alertGroupID := ""
+	acknowledgedAt := ""
+	createdAt := ""
+	resolvedAt := ""
 
 	if grafanaGroup != nil {
 		alertGroupID = grafanaGroup.ID
+		
+		// Format timestamps as RFC3339 strings (empty if not valid)
+		if grafanaGroup.AcknowledgedAt.Valid {
+			acknowledgedAt = grafanaGroup.AcknowledgedAt.Time.Format("2006-01-02T15:04:05Z")
+		}
+		if grafanaGroup.CreatedAt.Valid {
+			createdAt = grafanaGroup.CreatedAt.Time.Format("2006-01-02T15:04:05Z")
+		}
+		if grafanaGroup.ResolvedAt.Valid {
+			resolvedAt = grafanaGroup.ResolvedAt.Time.Format("2006-01-02T15:04:05Z")
+		}
 		
 		if grafanaClient != nil {
 			// Fetch user emails from user IDs (with caching)
@@ -332,6 +328,9 @@ func (e *Exporter) exportAlert(ctx context.Context, alert *models.GettableAlert,
 		"silenced_by":     silencedBy,
 		"inhibited_by":    inhibitedBy,
 		"alert_group_id":  alertGroupID,
+		"acknowledged_at": acknowledgedAt,
+		"created_at":      createdAt,
+		"resolved_at":     resolvedAt,
 	}
 
 	// Add extra labels from alert labels

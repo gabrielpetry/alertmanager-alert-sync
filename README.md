@@ -1,449 +1,177 @@
 # Alertmanager Alert Sync
 
-A Go service that automatically reconciles alerts between Prometheus Alertmanager and Grafana IRM (Incident Response & Management), ensuring consistency between both systems with comprehensive Prometheus metrics for monitoring.
+Synchronizes alerts between Prometheus Alertmanager and Grafana IRM, automatically resolving inconsistencies and exporting alert metrics.
 
-## Features
+## How It Works
 
-- **Automatic Reconciliation**: Continuously reconciles alerts on a configurable interval
-- **Alert State Export**: Automatically exports all alert states as Prometheus metrics with suppression status
-- **Inconsistency Detection**: Finds alerts silenced in Alertmanager but still firing in Grafana IRM
-- **Automatic Resolution**: Resolves inconsistent alerts in Grafana IRM
-- **Comprehensive Metrics**: Exposes detailed Prometheus metrics for monitoring reconciliation health and alert states
-- **Flexible Label Configuration**: Choose which alert labels and annotations to export as metric labels
-- **Manual Trigger**: Optional HTTP endpoint to trigger immediate reconciliation
-- **Kubernetes-Ready**: Includes liveness and readiness probes
-- **Production-Ready**: Built with error handling, logging, and observability in mind
+This service syncronizes Prometheus AlertManager with Grafana IRM in these ways:
+1. If an alert is Silenced in AlertManager but firing in Grafana IRM, it will be resolve in Grafana IRM.
+2. If an alert is Silenced in Grafana IRM but firin in Grafana IRM, it will create a silence in AlertManager for that alert
+  2.1 This will retrigger event 1, so the alert will be resolved in Grafana IRM
+3. When the alert is Acked in Grafana IRM, the metric for that alert will be labeled with the person who acked.
+4. When the alert is Silen in AlertManager, the metric for that alert will be labeled with the person who silenced it.
 
-📖 **Documentation:**
-- **[Reconciliation Guide](docs/RECONCILIATION.md)** - Learn about automatic reconciliation, best practices, and configuration
-- **[Metrics Documentation](docs/METRICS.md)** - Complete guide to all Prometheus metrics, queries, and alerts
+## Reconciliation Flow
 
-## Architecture
-
-The application is structured following Go best practices:
-
-```
-.
-├── cmd/
-│   └── alertmanager-alert-sync/    # Application entry point
-│       └── main.go
-├── internal/
-│   ├── alertmanager/               # Alertmanager client
-│   │   └── client.go
-│   ├── grafana/                    # Grafana IRM client
-│   │   ├── client.go
-│   │   └── models.go
-│   ├── metrics/                    # Prometheus metrics exporter
-│   │   └── exporter.go
-│   ├── server/                     # HTTP server and handlers
-│   │   └── handlers.go
-│   └── sync/                       # Reconciliation logic
-│       └── reconciler.go
-├── kubernetes/                     # Kubernetes deployment manifests
-│   └── bundle.yaml
-├── Dockerfile
-├── go.mod
-└── README.md
+```mermaid
+sequenceDiagram
+    participant Timer as Background Timer
+    participant AS as Alert Sync
+    participant AM as Alertmanager  
+    participant GIRM as Grafana IRM
+    participant PROM as Prometheus
+    
+    Timer->>AS: Trigger (every RECONCILE_INTERVAL)
+    AS->>AM: Fetch all alerts
+    AS->>GIRM: Fetch all incidents
+    AS->>AS: Compare states
+    
+    alt Inconsistency Found
+        AS->>GIRM: Resolve stale incidents
+        AS->>AS: Log resolution
+    end
+    
+    AS->>PROM: Export reconciliation metrics
+    AS->>PROM: Export alert state metrics
 ```
 
-## Environment Variables
+## Webhook Flow
 
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| `ALERTMANAGER_HOST` | Alertmanager host:port | `localhost:9093` | No |
-| `GRAFANA_IRM_URL` | Grafana IRM base URL | - | Yes |
-| `GRAFANA_IRM_TOKEN` | Grafana IRM API token | - | Yes |
-| `RECONCILE_INTERVAL` | Automatic reconciliation interval in seconds (0 or unset = disabled) | - | No |
-| `ALERT_EXPORT_INTERVAL` | Alert state export interval in seconds (0 or unset = disabled) | - | No |
-| `ALERTMANAGER_ALERTS_LABELS` | Comma-separated list of alert labels to export | - | No |
-| `ALERTMANAGER_ALERTS_ANNOTATIONS` | Comma-separated list of alert annotations to export | - | No |
-| `WEBHOOK_USERNAME` | Basic auth username for webhook endpoint | - | Yes (if using webhook) |
-| `WEBHOOK_PASSWORD` | Basic auth password for webhook endpoint | - | Yes (if using webhook) |
-| `WEBHOOK_EMAIL_ALLOWLIST` | Comma-separated list of allowed email addresses for webhook | - | No |
-| `PORT` | HTTP server port | `8080` | No |
-
-## Quick Reference
-
-```bash
-# Enable automatic reconciliation every 5 minutes
-export RECONCILE_INTERVAL=300
-
-# Or trigger manually
-curl -X POST http://localhost:8080/reconcile
+```mermaid
+sequenceDiagram
+    participant GIRM as Grafana IRM
+    participant AS as Alert Sync
+    participant AM as Alertmanager
+    
+    GIRM->>AS: POST /webhook (silence event)
+    AS->>AS: Validate basic auth
+    AS->>AS: Check user email allowlist
+    
+    alt User NOT in allowlist
+        AS->>GIRM: Unsilence alert group
+    else User in allowlist + has until time
+        AS->>AM: Create silence with matchers
+        AS->>AS: Log silence creation
+    end
+    
+    AS->>GIRM: HTTP 200 OK
 ```
 
-See the [Reconciliation Guide](docs/RECONCILIATION.md) for detailed configuration options.
+## Configuration
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `GRAFANA_IRM_URL` | Grafana IRM base URL | `https://your-grafana.com` |
+| `GRAFANA_IRM_TOKEN` | Grafana IRM API token | `glsa_xxx` |
+| `RECONCILE_INTERVAL` | Auto reconciliation (seconds) | `300` (5 min) |
+| `ALERTMANAGER_HOST` | Alertmanager endpoint | `localhost:9093` |
+| `ALERTMANAGER_ALERTS_LABELS` | Alert labels to export | `severity,cluster,namespace` |
+| `ALERTMANAGER_ALERTS_ANNOTATIONS` | Alert annotations to export | `summary,description` |
+| `WEBHOOK_USERNAME` | Webhook basic auth user | `webhook-user` |
+| `WEBHOOK_PASSWORD` | Webhook basic auth pass | `secure-pass` |
+| `WEBHOOK_EMAIL_ALLOWLIST` | Allowed silence users | `admin@co.com,ops@co.com` |
+
+**Note:** Alert metrics automatically include Grafana IRM timestamps (`acknowledged_at`, `created_at`, `resolved_at`) formatted as RFC3339 strings (e.g., `2024-11-07T15:30:45Z`). Empty values indicate the event hasn't occurred.
 
 ## Quick Start
 
-### Local Development
-
-1. **Set up environment variables:**
-
 ```bash
-export ALERTMANAGER_HOST="localhost:9093"
-export GRAFANA_IRM_URL="https://your-grafana-irm.com"
-export GRAFANA_IRM_TOKEN="your-api-token"
-export RECONCILE_INTERVAL="300"  # Run reconciliation every 5 minutes
-export ALERT_EXPORT_INTERVAL="30"  # Export alert states every 30 seconds
+# Local Development
+export GRAFANA_IRM_URL="https://your-grafana.com"
+export GRAFANA_IRM_TOKEN="glsa_xxx"
+export RECONCILE_INTERVAL="300"
 export ALERTMANAGER_ALERTS_LABELS="severity,cluster,namespace"
-export ALERTMANAGER_ALERTS_ANNOTATIONS="summary,description"
-```
-
-2. **Run the application:**
-
-```bash
 go run cmd/alertmanager-alert-sync/main.go
-```
 
-3. **Access the endpoints:**
-
-- Metrics: `http://localhost:8080/metrics`
-- Liveness: `http://localhost:8080/healthz`
-- Readiness: `http://localhost:8080/readyz`
-- Manual Reconcile: `http://localhost:8080/reconcile`
-- Webhook: `http://localhost:8080/webhook` (requires basic auth)
-
-### Docker
-
-1. **Build the image:**
-
-```bash
+# Docker
 docker build -t alertmanager-alert-sync .
-```
-
-2. **Run the container:**
-
-```bash
 docker run -p 8080:8080 \
-  -e ALERTMANAGER_HOST="alertmanager:9093" \
-  -e GRAFANA_IRM_URL="https://your-grafana-irm.com" \
-  -e GRAFANA_IRM_TOKEN="your-api-token" \
+  -e GRAFANA_IRM_URL="https://your-grafana.com" \
+  -e GRAFANA_IRM_TOKEN="glsa_xxx" \
+  -e RECONCILE_INTERVAL="300" \
+  -e ALERTMANAGER_ALERTS_LABELS="severity,cluster,namespace" \
   alertmanager-alert-sync
-```
 
-### Kubernetes
-
-```bash
+# Kubernetes
 kubectl apply -f kubernetes/bundle.yaml
 ```
 
-Make sure to update the ConfigMap and Secret in `kubernetes/bundle.yaml` with your configuration.
+## Endpoints
 
-## API Endpoints
+| Endpoint | Purpose | Response |
+|----------|---------|----------|
+| `/metrics` | Prometheus metrics | Reconciliation & alert metrics |
+| `/healthz` | Health check | 200 if reconciler ready |
+| `/webhook` | Grafana IRM webhooks | Handles silence events |
 
-### `/webhook`
+## Metrics
 
-Receives webhook events from Grafana IRM for silence management. **Requires basic authentication.**
+Key metrics exposed at `/metrics`:
 
-**Configuration:**
+- `alertmanager_sync_reconciliation_total` - Reconciliation attempts
+- `alertmanager_sync_reconciliation_failures_total` - Failed reconciliations  
+- `alertmanager_sync_inconsistencies_found` - Current inconsistencies
+- `alertmanager_sync_alert_state` - Alert states with default labels: `alertname`, `fingerprint`, `suppressed`, `acknowledged_by`, `resolved_by`, `silenced_by`, `inhibited_by`, `alert_group_id`, `acknowledged_at`, `created_at`, `resolved_at`, plus configured custom labels
 
-```bash
-export WEBHOOK_USERNAME="your-username"
-export WEBHOOK_PASSWORD="your-secure-password"
-export WEBHOOK_EMAIL_ALLOWLIST="admin@company.com,oncall@company.com"
+**Useful Queries:**
+```promql
+# Success rate
+rate(alertmanager_sync_reconciliation_total[5m]) - rate(alertmanager_sync_reconciliation_failures_total[5m])
+
+# Active alerts by severity  
+sum(alertmanager_sync_alert_state) by (severity)
+
+# Suppressed alerts
+sum(alertmanager_sync_alert_state{suppressed="true"})
+
+# Acknowledged alerts with timestamps
+alertmanager_sync_alert_state{acknowledged_by!=""}
+
+# Recently created alerts (created in last hour, requires external time comparison)
+alertmanager_sync_alert_state{created_at!=""}
 ```
 
-**Behavior:**
+## Webhook Setup
 
-When a silence event is received from Grafana IRM:
-
-1. **If event.type is not "silence"**: Event is ignored
-2. **If user email is NOT in allowlist**: Alert group is automatically unsilenced in Grafana
-3. **If user email IS in allowlist AND event.until is present**: Silence is created in Alertmanager with:
-   - Matchers from the alert labels
-   - Duration from event.time to event.until
-   - Author set to the user's email
-   - Comment including alert group ID, title, and automation note
-
-**Example webhook payload:**
-
-See [docs/WEBHOOK.md](docs/WEBHOOK.md) for the complete payload schema.
-
-**Testing the webhook:**
+Enable Grafana IRM silence management:
 
 ```bash
-curl -X POST http://localhost:8080/webhook \
-  -u username:password \
-  -H "Content-Type: application/json" \
-  -d @webhook_payload.json
+export WEBHOOK_USERNAME="webhook-user"  
+export WEBHOOK_PASSWORD="secure-password"
+export WEBHOOK_EMAIL_ALLOWLIST="admin@company.com,ops@company.com"
 ```
 
 **Grafana IRM Configuration:**
+1. Settings → Webhooks → New webhook
+2. URL: `https://your-service:8080/webhook`
+3. Auth: Basic Auth with above credentials
+4. Events: Enable "Silence" events
 
-1. Go to Grafana IRM Settings → Webhooks
-2. Create a new webhook with URL: `https://your-service:8080/webhook`
-3. Set authentication to Basic Auth with your credentials
-4. Enable for "Silence" events
+**Behavior:**
+- Users NOT in allowlist → Alert automatically unsilenced
+- Users in allowlist → Silence created in Alertmanager with proper matchers
 
-### `/metrics`
-
-Returns Prometheus metrics for the reconciliation process.
-
-**Reconciliation Metrics:**
-
-- `alertmanager_sync_reconciliation_total`: Total number of reconciliation attempts
-- `alertmanager_sync_reconciliation_failures_total`: Total number of failed reconciliations
-- `alertmanager_sync_reconciliation_duration_seconds`: Histogram of reconciliation durations
-- `alertmanager_sync_inconsistencies_found`: Number of inconsistencies found in last reconciliation
-- `alertmanager_sync_inconsistencies_resolved_total`: Total number of inconsistencies successfully resolved
-- `alertmanager_sync_inconsistencies_failed_resolve_total`: Total number of inconsistencies that failed to resolve
-- `alertmanager_sync_last_reconciliation_timestamp_seconds`: Timestamp of the last reconciliation (Unix time)
-- `alertmanager_sync_last_reconciliation_success`: Whether the last reconciliation was successful (1=success, 0=failure)
-
-**Alert State Metrics:**
-
-- `alertmanager_sync_alert_state`: Current state of each alert (labels: alertname, suppressed, plus configured labels/annotations)
-- `alertmanager_sync_alert_export_total`: Total number of alert export attempts
-- `alertmanager_sync_alert_export_failures_total`: Total number of failed alert exports
-- `alertmanager_sync_last_alert_export_timestamp_seconds`: Timestamp of the last alert export (Unix time)
-
-**Example Prometheus queries:**
-
-```promql
-# Reconciliation success rate
-rate(alertmanager_sync_reconciliation_total[5m]) - rate(alertmanager_sync_reconciliation_failures_total[5m])
-
-# Average reconciliation duration
-rate(alertmanager_sync_reconciliation_duration_seconds_sum[5m]) / rate(alertmanager_sync_reconciliation_duration_seconds_count[5m])
-
-# Current inconsistencies
-alertmanager_sync_inconsistencies_found
-
-# Time since last successful reconciliation
-time() - alertmanager_sync_last_reconciliation_timestamp_seconds
-
-# Count of active alerts by severity
-sum(alertmanager_sync_alert_state) by (severity)
-
-# Count of suppressed alerts
-sum(alertmanager_sync_alert_state{suppressed="true"})
+## Architecture
 
 ```
-
-### `/reconcile`
-
-Manually triggers a reconciliation between Alertmanager and Grafana IRM. 
-
-**When automatic reconciliation is enabled** via `RECONCILE_INTERVAL`, this endpoint can still be used to trigger immediate reconciliation without waiting for the next scheduled run.
-
-Returns `200 OK` with a success message, or `500` if reconciliation fails.
-
-### `/healthz`
-
-Kubernetes-style liveness probe. Returns `200 OK` if the service process is running.
-
-Use this for:
-- Kubernetes `livenessProbe`
-- Basic health monitoring
-- Process restart decisions
-
-### `/readyz`
-
-Kubernetes-style readiness probe. Returns `200 OK` if the service is ready to handle traffic (reconciler initialized with Grafana client).
-
-Returns `503 Service Unavailable` if:
-- Grafana IRM client failed to initialize
-- Service is not ready to reconcile alerts
-
-Use this for:
-- Kubernetes `readinessProbe`
-- Load balancer health checks
-- Service mesh readiness
-
-## Use Cases
-
-### 1. Metrics and Monitoring
-
-Scrape the `/metrics` endpoint with Prometheus to:
-- Monitor reconciliation success/failure rates
-- Track inconsistencies found and resolved
-- Alert on reconciliation failures
-- Monitor reconciliation performance
-
-**Prometheus configuration:**
-
-```yaml
-scrape_configs:
-  - job_name: 'alertmanager-sync'
-    static_configs:
-      - targets: ['alertmanager-sync:8080']
-    scrape_interval: 30s
-```
-
-**Example alerts:**
-
-```yaml
-groups:
-  - name: alertmanager-sync
-    rules:
-      - alert: ReconciliationFailing
-        expr: alertmanager_sync_last_reconciliation_success == 0
-        for: 10m
-        annotations:
-          summary: "Alert reconciliation is failing"
-          
-      - alert: HighInconsistencyRate
-        expr: alertmanager_sync_inconsistencies_found > 10
-        for: 5m
-        annotations:
-          summary: "High number of inconsistencies detected"
-          
-      - alert: ReconciliationStale
-        expr: (time() - alertmanager_sync_last_reconciliation_timestamp_seconds) > 600
-        for: 5m
-        annotations:
-          summary: "No reconciliation in the last 10 minutes"
-```
-
-### 2. Alert State Monitoring
-
-The service can automatically export all alert states from Alertmanager as Prometheus metrics on a regular interval.
-
-**Automatic alert export:**
-
-Set the `ALERT_EXPORT_INTERVAL` environment variable to enable:
-
-```bash
-export ALERT_EXPORT_INTERVAL="30"  # Export every 30 seconds
-export ALERTMANAGER_ALERTS_LABELS="severity,cluster,namespace"
-export ALERTMANAGER_ALERTS_ANNOTATIONS="summary,description"
-```
-
-The alert export will:
-- Run immediately on startup
-- Continue running at the specified interval
-- Export each alert with its state (active, suppressed, etc.)
-- Include custom labels and annotations as metric labels
-- Provide visibility into suppressed/silenced alerts
-
-**Use cases:**
-- Monitor which alerts are currently suppressed
-- Track alert counts by severity, cluster, or any custom label
-- Create dashboards showing alert distribution
-- Alert on excessive suppressions
-
-### 3. Alert Reconciliation
-
-The service can automatically reconcile alerts between Alertmanager and Grafana IRM on a regular interval.
-
-**Automatic reconciliation (recommended):**
-
-Set the `RECONCILE_INTERVAL` environment variable to enable automatic reconciliation:
-
-```bash
-export RECONCILE_INTERVAL="300"  # Run every 5 minutes
-```
-
-The reconciliation will:
-- Run immediately on startup
-- Continue running at the specified interval
-- Identify alerts that need attention in Grafana IRM
-- Auto-resolve alerts that have been silenced
-- Maintain consistency between monitoring systems
-
-**Manual reconciliation:**
-
-You can also trigger reconciliation manually via the `/reconcile` endpoint:
-
-```bash
-curl -X POST http://localhost:8080/reconcile
-```
-
-**Example cron job (alternative to automatic reconciliation):**
-
-```yaml
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: alert-reconciliation
-spec:
-  schedule: "*/5 * * * *"  # Every 5 minutes
-  jobTemplate:
-    spec:
-      template:
-        spec:
-          containers:
-          - name: reconcile
-            image: curlimages/curl:latest
-            command:
-            - curl
-            - -X
-            - POST
-            - http://alertmanager-sync:8080/reconcile
-          restartPolicy: OnFailure
+cmd/alertmanager-alert-sync/     # Application entry point
+internal/
+  ├── alertmanager/              # Alertmanager client  
+  ├── grafana/                   # Grafana IRM client
+  ├── metrics/                   # Prometheus metrics
+  ├── server/                    # HTTP handlers
+  └── sync/                      # Reconciliation logic
 ```
 
 ## Development
 
-### Project Structure
-
-- **cmd/**: Application entry points
-- **internal/**: Private application code
-  - **alertmanager/**: Alertmanager API client
-  - **grafana/**: Grafana IRM API client and models
-  - **metrics/**: Prometheus metrics handling
-  - **server/**: HTTP handlers and routing
-  - **sync/**: Reconciliation and synchronization logic
-
-### Adding New Features
-
-1. **New metrics**: Add to `internal/metrics/exporter.go`
-2. **New API endpoints**: Add handlers to `internal/server/handlers.go`
-3. **Reconciliation logic**: Implement in `internal/sync/reconciler.go`
-4. **Client extensions**: Extend clients in `internal/alertmanager/` or `internal/grafana/`
-
-### Testing
-
 ```bash
-# Run tests
+# Run locally
+go run cmd/alertmanager-alert-sync/main.go
+
+# Run tests  
 go test ./...
 
-# Run tests with coverage
-go test -cover ./...
+# Build
+go build -o alertmanager-alert-sync cmd/alertmanager-alert-sync/main.go
 ```
-
-## TODO
-
-- [ ] Implement automatic alert resolution in Grafana IRM (see `internal/sync/reconciler.go`)
-- [ ] Add retry logic for API calls
-- [ ] Add unit tests
-- [ ] Add integration tests
-- [ ] Add support for alert silencing via API
-- [ ] Add support for custom alert grouping
-- [ ] Add metrics for reconciliation operations
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes following Go best practices
-4. Add tests for new functionality
-5. Submit a pull request
-
-## License
-
-See [LICENSE](LICENSE) file for details.
-
-## Troubleshooting
-
-### Grafana IRM connection issues
-
-If you see `Grafana client initialization failed`, check:
-- `GRAFANA_IRM_URL` is correct and accessible
-- `GRAFANA_IRM_TOKEN` is valid and has proper permissions
-- Network connectivity to Grafana IRM
-
-The service will continue to work without Grafana features if the connection fails.
-
-### Metrics not updating
-
-- Check Alertmanager connectivity via `/all-alerts` endpoint
-- Verify `ALERTMANAGER_HOST` is correct
-- Check logs for sync failures
-
-### Missing labels in metrics
-
-- Verify label names in `ALERT_LABELS` match actual alert labels
-- Check that alerts actually have the requested labels
-- Labels not present on alerts will be exported as empty strings

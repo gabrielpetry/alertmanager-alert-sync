@@ -65,20 +65,7 @@ func main() {
 			log.Println("Background reconciliation disabled (set RECONCILE_INTERVAL to enable)")
 		}
 	} else {
-		// Fallback to alert export only if Grafana is not configured
-		alertExportIntervalStr := os.Getenv("ALERT_EXPORT_INTERVAL")
-		if alertExportIntervalStr != "" {
-			interval, err := strconv.Atoi(alertExportIntervalStr)
-			if err != nil || interval <= 0 {
-				log.Printf("Invalid ALERT_EXPORT_INTERVAL value '%s', must be a positive integer (seconds)", alertExportIntervalStr)
-			} else {
-				go startAlertExportLoop(amClient, exporter, time.Duration(interval)*time.Second)
-				log.Printf("Background alert export enabled with interval: %d seconds", interval)
-				log.Println("Note: Grafana IRM integration disabled - only basic metrics available")
-			}
-		} else {
-			log.Println("Background alert export disabled (set ALERT_EXPORT_INTERVAL to enable)")
-		}
+		log.Println("Grafana IRM integration disabled - no background processing available")
 	}
 
 	// Register HTTP handlers
@@ -87,9 +74,8 @@ func main() {
 	mux.HandleFunc("/healthz", srv.HealthzHandler)
 	mux.HandleFunc("/readyz", srv.ReadyzHandler)
 
-	// Only register reconcile and webhook endpoints if Grafana client is available
+	// Only register webhook endpoints if Grafana client is available
 	if grafanaClient != nil {
-		mux.HandleFunc("/reconcile", srv.ReconcileHandler)
 		if webhookHandler != nil {
 			webhookHandler.RegisterRoutes(mux)
 			log.Println("Webhook endpoint enabled at /webhook (requires basic auth)")
@@ -112,7 +98,6 @@ func main() {
 	log.Printf("  - /healthz: Liveness probe")
 	log.Printf("  - /readyz: Readiness probe")
 	if grafanaClient != nil {
-		log.Printf("  - /reconcile: Trigger manual reconciliation")
 		if webhookHandler != nil {
 			log.Printf("  - /webhook: Grafana IRM webhook endpoint (POST, basic auth required)")
 		}
@@ -152,45 +137,4 @@ func runOptimizedReconciliation(reconciler *sync.Reconciler) {
 	}
 }
 
-// startAlertExportLoop runs the alert export process at regular intervals
-func startAlertExportLoop(amClient *alertmanager.Client, exporter *metrics.Exporter, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
 
-	log.Printf("Starting alert export loop with interval: %v", interval)
-
-	// Run immediately on startup
-	runAlertExport(amClient, exporter)
-
-	// Then run on interval
-	for range ticker.C {
-		runAlertExport(amClient, exporter)
-	}
-}
-
-// runAlertExport performs a single alert export cycle with error handling
-func runAlertExport(amClient *alertmanager.Client, exporter *metrics.Exporter) {
-	ctx := context.Background()
-	log.Println("Running scheduled alert export...")
-
-	// Fetch all alerts from Alertmanager
-	alerts, err := amClient.GetAllAlerts(ctx)
-	if err != nil {
-		log.Printf("Alert export failed: %v", err)
-		exporter.RecordAlertExportFailure()
-		return
-	}
-
-	log.Printf("Fetched %d alerts from Alertmanager", len(alerts))
-
-	// Export alerts as metrics
-	if err := exporter.ExportAlerts(ctx, alerts, amClient); err != nil {
-		log.Printf("Error exporting alerts: %v", err)
-		exporter.RecordAlertExportFailure()
-		return
-	}
-
-	log.Println("Alert export completed successfully")
-}
-
-// startOptimizedReconciliationLoop runs the optimized reconciliation process at regular intervals

@@ -2,7 +2,6 @@ package server
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 
 	"github.com/gabrielpetry/alertmanager-alert-sync/internal/alertmanager"
@@ -40,24 +39,15 @@ func (s *Server) MetricsHandler(w http.ResponseWriter, r *http.Request) {
 	promhttp.Handler().ServeHTTP(w, r)
 }
 
-// ReconcileHandler triggers a reconciliation between Alertmanager and Grafana IRM
-// It identifies and logs inconsistencies between the two systems
-func (s *Server) ReconcileHandler(w http.ResponseWriter, r *http.Request) {
-	log.Println("Reconcile endpoint called...")
-
-	err := s.reconciler.ReconcileAndResolveOptimized(r.Context())
-	if err != nil {
-		log.Printf("Error during reconciliation: %v", err)
-		http.Error(w, "Error during reconciliation", http.StatusInternalServerError)
+// HealthzHandler provides a Kubernetes-style liveness probe endpoint
+// Returns 200 OK if the service is running and ready to accept traffic
+func (s *Server) HealthzHandler(w http.ResponseWriter, r *http.Request) {
+	// Check if reconciler is initialized (requires Grafana client)
+	if s.reconciler == nil {
+		http.Error(w, "Not ready: reconciler not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
-	fmt.Fprintf(w, "Reconciliation completed successfully\n")
-}
-
-// HealthzHandler provides a Kubernetes-style liveness probe endpoint
-// Returns 200 OK if the service is running
-func (s *Server) HealthzHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "OK\n")
 }

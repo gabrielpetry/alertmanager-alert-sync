@@ -23,10 +23,6 @@ WORKDIR /app
 # Copy the binary from builder
 COPY --from=builder /alertmanager-alert-sync ./
 
-# Default environment variables
-ENV ALERTMANAGER_HOST=localhost:9093
-ENV PORT=8080
-
 EXPOSE 8080
 
 CMD ["./alertmanager-alert-sync"]
