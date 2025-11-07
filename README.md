@@ -71,7 +71,7 @@ sequenceDiagram
 | `WEBHOOK_PASSWORD` | Webhook basic auth pass | `secure-pass` |
 | `WEBHOOK_EMAIL_ALLOWLIST` | Allowed silence users | `admin@co.com,ops@co.com` |
 
-**Note:** Alert metrics automatically include Grafana IRM timestamps (`acknowledged_at`, `created_at`, `resolved_at`) formatted as RFC3339 strings (e.g., `2024-11-07T15:30:45Z`). Empty values indicate the event hasn't occurred.
+**Note:** Alert metrics automatically include Grafana IRM timestamps (`acknowledged_at`, `created_at`, `resolved_at`) as Unix timestamps (seconds since epoch, e.g., `1699368645`). Empty values indicate the event hasn't occurred.
 
 ## Quick Start
 
@@ -127,8 +127,10 @@ sum(alertmanager_sync_alert_state{suppressed="true"})
 # Acknowledged alerts with timestamps
 alertmanager_sync_alert_state{acknowledged_by!=""}
 
-# Recently created alerts (created in last hour, requires external time comparison)
+# Alerts with creation timestamps (use in dashboard variables)
 alertmanager_sync_alert_state{created_at!=""}
+
+# Time-based filtering can be done in Grafana using the created_at label value
 ```
 
 ## Webhook Setup

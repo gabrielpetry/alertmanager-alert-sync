@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -296,15 +297,15 @@ func (e *Exporter) exportAlert(ctx context.Context, alert *models.GettableAlert,
 	if grafanaGroup != nil {
 		alertGroupID = grafanaGroup.ID
 		
-		// Format timestamps as RFC3339 strings (empty if not valid)
+		// Format timestamps as Unix timestamps (seconds since epoch, empty if not valid)
 		if grafanaGroup.AcknowledgedAt.Valid {
-			acknowledgedAt = grafanaGroup.AcknowledgedAt.Time.Format("2006-01-02T15:04:05Z")
+			acknowledgedAt = fmt.Sprintf("%d", grafanaGroup.AcknowledgedAt.Time.Unix())
 		}
 		if grafanaGroup.CreatedAt.Valid {
-			createdAt = grafanaGroup.CreatedAt.Time.Format("2006-01-02T15:04:05Z")
+			createdAt = fmt.Sprintf("%d", grafanaGroup.CreatedAt.Time.Unix())
 		}
 		if grafanaGroup.ResolvedAt.Valid {
-			resolvedAt = grafanaGroup.ResolvedAt.Time.Format("2006-01-02T15:04:05Z")
+			resolvedAt = fmt.Sprintf("%d", grafanaGroup.ResolvedAt.Time.Unix())
 		}
 		
 		if grafanaClient != nil {
