@@ -46,11 +46,11 @@ jobs:
 
       - name: Build Image
         id: build_image_multiarch
-        uses: ./
+        uses: redhat-actions/buildah-build@v2
         with:
           image: ${{ env.IMAGE_NAME }}
           tags: latest v1
-          archs: amd64,arm64                 # Single arch testcase
+          archs: amd64
           containerfiles: |
             ./Dockerfile
 
