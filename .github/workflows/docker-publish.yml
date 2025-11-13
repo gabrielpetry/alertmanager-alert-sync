@@ -50,7 +50,7 @@ jobs:
         with:
           image: ${{ env.IMAGE_NAME }}
           tags: latest v1
-          archs: amd64
+          archs: amd64,arm64
           containerfiles: |
             ./Dockerfile
 
@@ -58,8 +58,8 @@ jobs:
         id: push-to-registry
         uses: redhat-actions/push-to-registry@v2
         with:
-          image: ${{ steps.build-image.outputs.image }}
-          tags: ${{ steps.build-image.outputs.tags }}
+          image: ${{ steps.build_image_multiarch.outputs.image }}
+          tags: ${{ steps.build_image_multiarch.outputs.tags }}
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
